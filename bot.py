@@ -1,6 +1,6 @@
 """Main entry point for the X/Twitter Media Downloader Telegram Bot."""
-from keep_alive import keep_alive
 from __future__ import annotations
+from keep_alive import keep_alive
 
 import asyncio
 import logging
