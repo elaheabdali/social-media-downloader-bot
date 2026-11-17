@@ -16,7 +16,7 @@ from database import Database
 from handlers import media_router, start_router
 from services import PendingDownloadStore
 
-WEBAPP_URL = "https://elaheabdali.github.io/x-media-downloader-bot/"
+# WEBAPP_URL = "https://elaheabdali.github.io/x-media-downloader-bot/"
 
 def setup_logging(level: str) -> None:
     """Configure structured application logging."""
