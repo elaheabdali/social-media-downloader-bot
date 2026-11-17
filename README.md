@@ -1,4 +1,37 @@
-# X (Twitter) GIF & Video Downloader Telegram Bot
+
+# X (Twitter) GIF & Video Downloader Bot
+
+An asynchronous Telegram bot for downloading GIFs and videos from X (Twitter).
+
+## Try the Bot
+
+[Start the Telegram Bot](https://t.me/bezanDownld_bot)
+
+## Features
+
+- Download videos from X (Twitter).
+- Automatically detect and send GIFs.
+- Select video quality.
+- English and Persian language support.
+- Asynchronous processing with aiogram.
+
+## Tech Stack
+
+- Python 3.11+
+- aiogram 3
+- yt-dlp
+- SQLite
+- aiosqlite
+- python-dotenv
+
+## Installation
+
+1. Clone the repository.
+2. Create a virtual environment.
+3. Install dependencies.
+4. Configure your `.env` file.
+5. Run the bot.
+
 
 Production-ready, asynchronous Telegram bot built with **Python 3.11+**, **aiogram v3**, **yt-dlp**, **aiosqlite**, and **python-dotenv**.
 
