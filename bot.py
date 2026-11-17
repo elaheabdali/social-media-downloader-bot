@@ -1,5 +1,5 @@
 """Main entry point for the X/Twitter Media Downloader Telegram Bot."""
-
+from keep_alive import keep_alive
 from __future__ import annotations
 
 import asyncio
@@ -86,3 +86,5 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         pass
+
+keep_alive()
