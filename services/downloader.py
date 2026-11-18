@@ -585,8 +585,6 @@
 #         shutil.rmtree(req_dir, ignore_errors=True)
 #         raise
 
-
-
 """Asynchronous yt-dlp + fallback wrapper for X (Twitter) and Instagram media extraction."""
 
 from __future__ import annotations
@@ -769,6 +767,25 @@ def normalize_media_url(url: str) -> str:
         parsed = parsed._replace(path=clean_path, query="", fragment="")
 
     return urlunparse(parsed)
+
+
+def _load_ig_cookies(cookies_file: Path | None) -> dict[str, str]:
+    """Parse Netscape-formatted cookies.txt into a dict for aiohttp sessions."""
+    cookies: dict[str, str] = {}
+    if not cookies_file or not cookies_file.exists():
+        return cookies
+
+    try:
+        for line in cookies_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 7 and "instagram.com" in parts[0].lower():
+                cookies[parts[5]] = parts[6]
+    except Exception:
+        logger.warning("Failed to parse Instagram cookies file")
+    return cookies
 
 
 def _classify_yt_dlp_error(exc: Exception) -> DownloaderError:
@@ -1060,24 +1077,45 @@ def _extract_ig_profile_username(url: str) -> str | None:
     return None
 
 
-async def _inspect_ig_profile(username: str, source_url: str) -> list[MediaItem]:
-    """Fetch HD profile picture (avatar) for a public Instagram username."""
-    api_url = f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}"
+def _clean_escaped_url(raw: str) -> str:
+    return (
+        raw.replace("\\u0026", "&")
+        .replace("\\/", "/")
+        .replace("&amp;", "&")
+        .strip()
+    )
+
+
+async def _inspect_ig_profile(
+    username: str,
+    source_url: str,
+    cookies_file: Path | None = None,
+) -> list[MediaItem]:
+    """Fetch HD profile picture (avatar) for public or private Instagram accounts."""
+    cookies = _load_ig_cookies(cookies_file)
     api_headers = {
-        "User-Agent": "Instagram 219.0.0.12.117 Android",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        ),
         "X-IG-App-ID": "936619743392459",
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": f"https://www.instagram.com/{username}/",
         "Accept": "*/*",
     }
+    if "csrftoken" in cookies:
+        api_headers["X-CSRFToken"] = cookies["csrftoken"]
 
-    async with aiohttp.ClientSession() as session:
-        # 1. Try Instagram Web Profile API
+    async with aiohttp.ClientSession(cookies=cookies) as session:
+        # 1. Primary: Instagram Web Profile Info API (returns profile_pic_url_hd even for private accounts)
+        api_url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}"
         try:
             async with session.get(
                 api_url, headers=api_headers, timeout=aiohttp.ClientTimeout(total=15)
             ) as resp:
                 if resp.status == 404:
                     raise DownloaderError("err_private_or_deleted")
-                if resp.status == 200:
+                if resp.status == 200 and "application/json" in resp.headers.get("Content-Type", ""):
                     payload = await resp.json()
                     user = (payload.get("data") or {}).get("user") or {}
                     pic_url = user.get("profile_pic_url_hd") or user.get("profile_pic_url")
@@ -1093,9 +1131,33 @@ async def _inspect_ig_profile(username: str, source_url: str) -> list[MediaItem]
         except DownloaderError:
             raise
         except Exception:
-            logger.debug("IG profile API failed for %s, trying HTML fallback", username)
+            logger.debug("IG web_profile_info failed for %s, trying search endpoint", username)
 
-        # 2. Fallback: Scrape og:image from public profile page
+        # 2. Secondary: Instagram TopSearch endpoint (works for both public & private accounts)
+        search_url = f"https://www.instagram.com/web/search/topsearch/?context=blended&query={username}"
+        try:
+            async with session.get(
+                search_url, headers=api_headers, timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
+                if resp.status == 200 and "application/json" in resp.headers.get("Content-Type", ""):
+                    payload = await resp.json()
+                    for entry in payload.get("users") or []:
+                        user_obj = entry.get("user") or {}
+                        if user_obj.get("username", "").lower() == username.lower():
+                            pic_url = user_obj.get("profile_pic_url")
+                            if pic_url:
+                                return [
+                                    MediaItem(
+                                        media_type="photo",
+                                        title=f"@{username}",
+                                        source_url=source_url,
+                                        direct_url=pic_url,
+                                    )
+                                ]
+        except Exception:
+            logger.debug("IG topsearch failed for %s, trying HTML fallback", username)
+
+        # 3. Tertiary: Scrape profile HTML for profile_pic_url_hd or og:image
         profile_page = f"https://www.instagram.com/{username}/"
         async with session.get(
             profile_page, headers=BROWSER_HEADERS, timeout=aiohttp.ClientTimeout(total=15)
@@ -1103,6 +1165,18 @@ async def _inspect_ig_profile(username: str, source_url: str) -> list[MediaItem]
             if resp.status == 404:
                 raise DownloaderError("err_private_or_deleted")
             html_text = await resp.text()
+
+    hd_match = re.search(r'"profile_pic_url_hd"\s*:\s*"([^"]+)"', html_text)
+    if hd_match:
+        pic_url = _clean_escaped_url(hd_match.group(1))
+        return [
+            MediaItem(
+                media_type="photo",
+                title=f"@{username}",
+                source_url=source_url,
+                direct_url=pic_url,
+            )
+        ]
 
     og_match = re.search(
         r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']',
@@ -1120,16 +1194,11 @@ async def _inspect_ig_profile(username: str, source_url: str) -> list[MediaItem]
             )
         ]
 
+    # If redirected to login wall without cookies, surface age/login error so user knows auth is required
+    if not cookies and ("accounts/login" in html_text.lower() or "loginform" in html_text.lower()):
+        raise DownloaderError("err_age_restricted")
+
     raise DownloaderError("err_private_or_deleted")
-
-
-def _clean_escaped_url(raw: str) -> str:
-    return (
-        raw.replace("\\u0026", "&")
-        .replace("\\/", "/")
-        .replace("&amp;", "&")
-        .strip()
-    )
 
 
 async def _inspect_ig_embed_fallback(url: str) -> list[MediaItem]:
@@ -1155,7 +1224,6 @@ async def _inspect_ig_embed_fallback(url: str) -> list[MediaItem]:
     items: list[MediaItem] = []
     seen_urls: set[str] = set()
 
-    # Extract any embedded videos first
     for vid_match in re.finditer(r'"video_url"\s*:\s*"([^"]+)"', page):
         v_url = _clean_escaped_url(vid_match.group(1))
         if v_url and v_url not in seen_urls:
@@ -1179,7 +1247,6 @@ async def _inspect_ig_embed_fallback(url: str) -> list[MediaItem]:
                 )
             )
 
-    # Extract display_url images from JSON payload (handles single photos & carousels)
     for img_match in re.finditer(r'"display_url"\s*:\s*"([^"]+)"', page):
         i_url = _clean_escaped_url(img_match.group(1))
         if i_url and i_url not in seen_urls:
@@ -1193,7 +1260,6 @@ async def _inspect_ig_embed_fallback(url: str) -> list[MediaItem]:
                 )
             )
 
-    # Fallback: EmbeddedMediaImage tag if JSON fields were not present
     if not items:
         tag_match = re.search(
             r'<img[^>]+class=["\'][^"\']*EmbeddedMediaImage[^"\']*["\'][^>]+src=["\']([^"\']+)["\']',
@@ -1282,7 +1348,7 @@ async def inspect_url(
     if is_ig:
         username = _extract_ig_profile_username(normalized)
         if username:
-            return await _inspect_ig_profile(username, normalized)
+            return await _inspect_ig_profile(username, normalized, cookies_file=cookies_file)
 
         try:
             return await asyncio.to_thread(
