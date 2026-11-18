@@ -1,4 +1,4 @@
-"""Asynchronous yt-dlp wrapper for X (Twitter) GIF and video extraction."""
+"""Asynchronous yt-dlp + FxTwitter fallback wrapper for X (Twitter) GIF and video extraction."""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse, urlunparse
 
+import aiohttp
+import imageio_ffmpeg
 import yt_dlp
 from yt_dlp.utils import DownloadError
 
@@ -26,6 +28,13 @@ X_URL_REGEX = re.compile(
     r"(?:x\.com|twitter\.com|fxtwitter\.com|vxtwitter\.com|t\.co)/[^\s<>\"']+",
     re.IGNORECASE,
 )
+
+STATUS_PATH_REGEX = re.compile(
+    r"^/([^/]+/status/\d+)(?:/(?:photo|video)/\d+)?/?$",
+    re.IGNORECASE,
+)
+
+FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
 
 class DownloaderError(Exception):
@@ -46,6 +55,7 @@ class VideoQuality:
     format_selector: str
     filesize_bytes: int | None
     exceeds_limit: bool
+    direct_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +68,7 @@ class MediaItem:
     duration: float | None
     qualities: list[VideoQuality] = field(default_factory=list)
     playlist_index: int | None = None
+    direct_url: str | None = None
 
 
 @dataclass
@@ -107,7 +118,7 @@ def extract_x_url(text: str) -> str | None:
 
 
 def normalize_x_url(url: str) -> str:
-    """Normalize fxtwitter/vxtwitter/mobile links to x.com for yt-dlp."""
+    """Normalize domain, strip /photo/1 or /video/1 suffixes and tracking queries."""
     parsed = urlparse(url)
     host = parsed.netloc.lower()
     if host in {
@@ -121,8 +132,13 @@ def normalize_x_url(url: str) -> str:
         "www.twitter.com",
     }:
         parsed = parsed._replace(netloc="x.com")
-        return urlunparse(parsed)
-    return url
+
+    path_match = STATUS_PATH_REGEX.match(parsed.path)
+    if path_match:
+        clean_path = f"/{path_match.group(1)}"
+        parsed = parsed._replace(path=clean_path, query="", fragment="")
+
+    return urlunparse(parsed)
 
 
 def _classify_yt_dlp_error(exc: Exception) -> DownloaderError:
@@ -198,7 +214,6 @@ def _is_twitter_gif(info: dict[str, Any], formats: list[dict[str, Any]]) -> bool
     has_any_audio = any(
         f.get("acodec") not in (None, "none") for f in formats
     )
-    # Single silent MP4 stream is typically a Twitter GIF
     if not has_any_audio and len(video_formats) == 1:
         return True
     return False
@@ -217,7 +232,6 @@ def _build_video_qualities(
         if vcodec in (None, "none") or not isinstance(height, int) or height <= 0:
             continue
 
-        # Prefer MP4 / formats that already include audio, then higher bitrate
         ext_score = 1 if fmt.get("ext") == "mp4" else 0
         audio_score = 1 if fmt.get("acodec") not in (None, "none") else 0
         tbr_score = float(fmt.get("tbr") or 0.0)
@@ -296,15 +310,117 @@ def _parse_entry(
     )
 
 
-def _inspect_url_sync(url: str) -> list[MediaItem]:
+async def _inspect_via_fxtwitter(url: str) -> list[MediaItem]:
+    """Fallback inspector using api.fxtwitter.com to bypass age-restriction/NSFW blocks."""
+    parsed = urlparse(url)
+    api_url = f"https://api.fxtwitter.com{parsed.path}"
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; TelegramBot/1.0)"}
+
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status != 200:
+                raise DownloaderError("err_no_media", f"FxTwitter status {resp.status}")
+            data = await resp.json()
+
+    tweet = data.get("tweet") or {}
+    media_block = tweet.get("media") or {}
+    videos = media_block.get("videos") or []
+    if not videos:
+        all_media = media_block.get("all") or []
+        videos = [m for m in all_media if m.get("type") in ("video", "gif")]
+
+    if not videos:
+        raise DownloaderError("err_no_media", "No video/gif found in FxTwitter response")
+
+    raw_title = (tweet.get("text") or "X Media").strip()
+    title = (raw_title[:80] + "…") if len(raw_title) > 80 else raw_title
+    items: list[MediaItem] = []
+
+    for idx, vid in enumerate(videos, start=1):
+        vid_type = vid.get("type", "video")
+        vid_url = vid.get("url")
+        duration = vid.get("duration")
+        if not vid_url:
+            continue
+
+        if vid_type == "gif" or "/tweet_video/" in vid_url.lower():
+            items.append(
+                MediaItem(
+                    media_type="gif",
+                    title=title,
+                    source_url=url,
+                    duration=duration,
+                    qualities=[],
+                    playlist_index=idx if len(videos) > 1 else None,
+                    direct_url=vid_url,
+                )
+            )
+        else:
+            variants = vid.get("variants") or []
+            mp4_variants = [
+                v for v in variants
+                if v.get("content_type") == "video/mp4" and v.get("url")
+            ]
+            qualities: list[VideoQuality] = []
+            seen_heights: set[int] = set()
+
+            if mp4_variants:
+                mp4_variants.sort(key=lambda x: x.get("bitrate", 0), reverse=True)
+                for v in mp4_variants:
+                    m = re.search(r"/(\d+)x(\d+)/", v["url"])
+                    h = int(m.group(2)) if m else 720
+                    if h in seen_heights:
+                        continue
+                    seen_heights.add(h)
+                    qualities.append(
+                        VideoQuality(
+                            height=h,
+                            label=f"{h}p",
+                            format_selector=f"direct:{v['url']}",
+                            filesize_bytes=None,
+                            exceeds_limit=False,
+                            direct_url=v["url"],
+                        )
+                    )
+
+            if not qualities:
+                qualities.append(
+                    VideoQuality(
+                        height=720,
+                        label="HD",
+                        format_selector=f"direct:{vid_url}",
+                        filesize_bytes=None,
+                        exceeds_limit=False,
+                        direct_url=vid_url,
+                    )
+                )
+
+            items.append(
+                MediaItem(
+                    media_type="video",
+                    title=title,
+                    source_url=url,
+                    duration=duration,
+                    qualities=qualities,
+                    playlist_index=idx if len(videos) > 1 else None,
+                    direct_url=vid_url,
+                )
+            )
+
+    if not items:
+        raise DownloaderError("err_no_media")
+    return items
+
+
+def _inspect_url_sync(normalized: str) -> list[MediaItem]:
     """Blocking yt-dlp metadata inspection (run inside asyncio.to_thread)."""
-    normalized = normalize_x_url(url)
     ydl_opts: dict[str, Any] = {
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
         "extract_flat": False,
         "socket_timeout": 20,
+        "ffmpeg_location": FFMPEG_PATH,
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -336,8 +452,34 @@ def _inspect_url_sync(url: str) -> list[MediaItem]:
 
 
 async def inspect_url(url: str) -> list[MediaItem]:
-    """Asynchronously inspect an X/Twitter URL without blocking the event loop."""
-    return await asyncio.to_thread(_inspect_url_sync, url)
+    """Inspect X/Twitter URL via yt-dlp, falling back to FxTwitter for NSFW/age-restricted posts."""
+    normalized = normalize_x_url(url)
+    try:
+        return await asyncio.to_thread(_inspect_url_sync, normalized)
+    except DownloaderError as primary_err:
+        logger.info(
+            "Primary yt-dlp inspection failed (%s), trying FxTwitter fallback for %s",
+            primary_err.error_key,
+            normalized,
+        )
+        try:
+            return await _inspect_via_fxtwitter(normalized)
+        except Exception:
+            raise primary_err
+
+
+async def _download_direct_mp4(direct_url: str, req_dir: Path) -> Path:
+    """Download a direct MP4 stream extracted from FxTwitter fallback."""
+    out_path = req_dir / f"{uuid.uuid4().hex[:12]}.mp4"
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; TelegramBot/1.0)"}
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.get(direct_url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+            if resp.status != 200:
+                raise DownloaderError("err_generic", f"Direct download failed: HTTP {resp.status}")
+            with out_path.open("wb") as f:
+                async for chunk in resp.content.iter_chunked(65536):
+                    f.write(chunk)
+    return out_path
 
 
 def _download_media_sync(
@@ -356,6 +498,7 @@ def _download_media_sync(
         "socket_timeout": 30,
         "retries": 2,
         "noplaylist": playlist_index is None,
+        "ffmpeg_location": FFMPEG_PATH,
     }
     if format_selector:
         ydl_opts["format"] = format_selector
@@ -383,7 +526,6 @@ def _download_media_sync(
             if prepared.exists():
                 return prepared
 
-            # Fallback: if ffmpeg remuxed to .mp4, find the resulting file in req_dir
             mp4_candidate = prepared.with_suffix(".mp4")
             if mp4_candidate.exists():
                 return mp4_candidate
@@ -408,21 +550,37 @@ async def download_media(
     format_selector: str | None = None,
     playlist_index: int | None = None,
 ) -> tuple[Path, Path]:
-    """Download media into a unique temp directory.
-
-    Returns (file_path, req_dir). Caller MUST remove req_dir in a try...finally block.
-    """
+    """Download media into a unique temp directory."""
     temp_root.mkdir(parents=True, exist_ok=True)
     req_dir = Path(tempfile.mkdtemp(prefix="xbot_", dir=temp_root))
     try:
-        file_path = await asyncio.to_thread(
-            _download_media_sync,
-            url,
-            req_dir,
-            format_selector,
-            playlist_index,
-        )
-        return file_path, req_dir
+        if format_selector and format_selector.startswith("direct:"):
+            direct_url = format_selector.split("direct:", 1)[1]
+            file_path = await _download_direct_mp4(direct_url, req_dir)
+            return file_path, req_dir
+
+        try:
+            file_path = await asyncio.to_thread(
+                _download_media_sync,
+                url,
+                req_dir,
+                format_selector,
+                playlist_index,
+            )
+            return file_path, req_dir
+        except DownloaderError:
+            items = await _inspect_via_fxtwitter(url)
+            target_idx = (playlist_index - 1) if playlist_index and playlist_index > 0 else 0
+            target_item = items[min(target_idx, len(items) - 1)]
+            fallback_url = (
+                target_item.qualities[0].direct_url
+                if target_item.qualities and target_item.qualities[0].direct_url
+                else target_item.direct_url
+            )
+            if not fallback_url:
+                raise
+            file_path = await _download_direct_mp4(fallback_url, req_dir)
+            return file_path, req_dir
     except Exception:
         shutil.rmtree(req_dir, ignore_errors=True)
         raise
