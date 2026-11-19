@@ -1,4 +1,4 @@
-"""Asynchronous yt-dlp + fallback wrapper for X (Twitter) and Instagram media extraction."""
+"""Asynchronous yt-dlp + fallback wrapper for X (Twitter), Instagram, and YouTube."""
 
 from __future__ import annotations
 
@@ -26,8 +26,9 @@ from config import TELEGRAM_MAX_FILE_SIZE_BYTES
 logger = logging.getLogger(__name__)
 
 MEDIA_URL_REGEX = re.compile(
-    r"https?://(?:www\.|mobile\.|m\.|dd)?"
-    r"(?:x\.com|twitter\.com|fxtwitter\.com|vxtwitter\.com|t\.co|instagram\.com|instagr\.am)"
+    r"https?://(?:www\.|mobile\.|m\.|dd\.|music\.)?"
+    r"(?:x\.com|twitter\.com|fxtwitter\.com|vxtwitter\.com|t\.co|"
+    r"instagram\.com|instagr\.am|youtube\.com|youtu\.be)"
     r"/[^\s<>\"']+",
     re.IGNORECASE,
 )
@@ -92,7 +93,7 @@ class VideoQuality:
 
 @dataclass(frozen=True)
 class MediaItem:
-    """Inspected media item from an X/Twitter or Instagram post/profile."""
+    """Inspected media item from an X/Twitter, Instagram, or YouTube URL."""
 
     media_type: Literal["gif", "video", "photo"]
     title: str
@@ -101,7 +102,7 @@ class MediaItem:
     qualities: list[VideoQuality] = field(default_factory=list)
     playlist_index: int | None = None
     direct_url: str | None = None
-    platform: Literal["x", "instagram"] = "x"
+    platform: Literal["x", "instagram", "youtube"] = "x"
 
 
 @dataclass
@@ -141,7 +142,7 @@ class PendingDownloadStore:
 
 
 def extract_x_url(text: str) -> str | None:
-    """Return the first valid X/Twitter or Instagram URL found in text, or None."""
+    """Return the first valid X/Twitter, Instagram, or YouTube URL found in text, or None."""
     if not text:
         return None
     match = MEDIA_URL_REGEX.search(text)
@@ -155,10 +156,21 @@ def _is_instagram_url(url: str) -> bool:
     return any(d in host for d in ("instagram.com", "instagr.am"))
 
 
+def _is_youtube_url(url: str) -> bool:
+    host = urlparse(url).netloc.lower()
+    return any(d in host for d in ("youtube.com", "youtu.be"))
+
+
 def normalize_media_url(url: str) -> str:
-    """Normalize X or Instagram domain and strip unnecessary suffixes/tracking params."""
+    """Normalize X, Instagram, or YouTube domain and strip tracking params."""
     parsed = urlparse(url)
     host = parsed.netloc.lower()
+
+    if _is_youtube_url(url):
+        shorts_match = re.match(r"^/shorts/([A-Za-z0-9_-]+)", parsed.path)
+        if shorts_match:
+            return f"https://www.youtube.com/watch?v={shorts_match.group(1)}"
+        return url
 
     if _is_instagram_url(url):
         parsed = parsed._replace(netloc="www.instagram.com", query="", fragment="")
@@ -184,7 +196,7 @@ def normalize_media_url(url: str) -> str:
     return urlunparse(parsed)
 
 
-def _load_ig_cookies(cookies_file: Path | None) -> dict[str, str]:
+def _load_domain_cookies(cookies_file: Path | None, domain_keyword: str) -> dict[str, str]:
     """Parse Netscape-formatted cookies.txt into a dict for aiohttp sessions."""
     cookies: dict[str, str] = {}
     if not cookies_file or not cookies_file.exists():
@@ -196,10 +208,10 @@ def _load_ig_cookies(cookies_file: Path | None) -> dict[str, str]:
             if not line or line.startswith("#"):
                 continue
             parts = line.split("\t")
-            if len(parts) >= 7 and "instagram.com" in parts[0].lower():
+            if len(parts) >= 7 and domain_keyword in parts[0].lower():
                 cookies[parts[5]] = parts[6]
     except Exception:
-        logger.warning("Failed to parse Instagram cookies file")
+        logger.warning("Failed to parse cookies file for %s", domain_keyword)
     return cookies
 
 
@@ -226,6 +238,8 @@ def _classify_yt_dlp_error(exc: Exception) -> DownloaderError:
             "age restricted",
             "login",
             "sign in",
+            "confirm you’re not a bot",
+            "confirm you're not a bot",
             "authenticate",
             "cookies",
         )
@@ -250,15 +264,23 @@ def _classify_yt_dlp_error(exc: Exception) -> DownloaderError:
     return DownloaderError("err_generic", str(exc))
 
 
-def _estimate_filesize(fmt: dict[str, Any], duration: float | None) -> int | None:
-    """Return exact or approximate byte size for a format."""
+def _estimate_filesize(
+    fmt: dict[str, Any], duration: float | None, has_audio: bool = True
+) -> int | None:
+    """Return exact or approximate byte size for a format (including audio overhead if DASH)."""
     size = fmt.get("filesize") or fmt.get("filesize_approx")
+    base_bytes: int | None = None
     if isinstance(size, (int, float)) and size > 0:
-        return int(size)
-    tbr = fmt.get("tbr") or fmt.get("vbr")
-    if isinstance(tbr, (int, float)) and tbr > 0 and duration and duration > 0:
-        return int((tbr * 1000 / 8) * duration)
-    return None
+        base_bytes = int(size)
+    else:
+        tbr = fmt.get("tbr") or fmt.get("vbr")
+        if isinstance(tbr, (int, float)) and tbr > 0 and duration and duration > 0:
+            base_bytes = int((tbr * 1000 / 8) * duration)
+
+    if base_bytes is not None and not has_audio and duration and duration > 0:
+        base_bytes += int((128 * 1000 / 8) * duration)
+
+    return base_bytes
 
 
 def _is_twitter_gif(formats: list[dict[str, Any]]) -> bool:
@@ -290,6 +312,8 @@ def _build_video_qualities(
         height = fmt.get("height")
         if vcodec in (None, "none") or not isinstance(height, int) or height <= 0:
             continue
+        if height > 1080:
+            continue
 
         ext_score = 1 if fmt.get("ext") == "mp4" else 0
         audio_score = 1 if fmt.get("acodec") not in (None, "none") else 0
@@ -315,7 +339,7 @@ def _build_video_qualities(
                 f"best[height<={height}][ext=mp4]/best[height<={height}]"
             )
 
-        size_bytes = _estimate_filesize(fmt, duration)
+        size_bytes = _estimate_filesize(fmt, duration, has_audio=has_audio)
         exceeds = size_bytes is not None and size_bytes > TELEGRAM_MAX_FILE_SIZE_BYTES
         qualities.append(
             VideoQuality(
@@ -333,20 +357,25 @@ def _parse_entry(
     entry: dict[str, Any],
     source_url: str,
     playlist_index: int | None = None,
-    is_instagram: bool = False,
+    platform: Literal["x", "instagram", "youtube"] = "x",
 ) -> MediaItem | None:
     """Convert a single yt-dlp info dict into a MediaItem."""
     formats: list[dict[str, Any]] = entry.get("formats") or []
     if not formats:
         return None
 
-    platform: Literal["x", "instagram"] = "instagram" if is_instagram else "x"
-    default_title = "Instagram Video" if is_instagram else "X Video"
-    raw_title = (entry.get("title") or entry.get("description") or default_title).strip()
+    default_titles = {
+        "youtube": "YouTube Video",
+        "instagram": "Instagram Video",
+        "x": "X Video",
+    }
+    raw_title = (
+        entry.get("title") or entry.get("description") or default_titles[platform]
+    ).strip()
     title = (raw_title[:80] + "…") if len(raw_title) > 80 else raw_title
     duration = entry.get("duration")
 
-    if not is_instagram and _is_twitter_gif(formats):
+    if platform == "x" and _is_twitter_gif(formats):
         return MediaItem(
             media_type="gif",
             title=title,
@@ -502,7 +531,7 @@ async def _inspect_ig_profile(
     cookies_file: Path | None = None,
 ) -> list[MediaItem]:
     """Fetch HD profile picture (avatar) for public or private Instagram accounts."""
-    cookies = _load_ig_cookies(cookies_file)
+    cookies = _load_domain_cookies(cookies_file, "instagram.com")
     api_headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -695,10 +724,29 @@ async def _inspect_ig_embed_fallback(url: str) -> list[MediaItem]:
     return items
 
 
+def _apply_platform_ydl_opts(
+    ydl_opts: dict[str, Any],
+    url: str,
+    ig_cookies_file: Path | None = None,
+    yt_cookies_file: Path | None = None,
+) -> None:
+    """Configure platform-specific extractor arguments and optional cookies."""
+    if _is_instagram_url(url):
+        if ig_cookies_file and ig_cookies_file.exists():
+            ydl_opts["cookiefile"] = str(ig_cookies_file)
+    elif _is_youtube_url(url):
+        ydl_opts["extractor_args"] = {
+            "youtube": {"player_client": ["android", "ios", "web"]}
+        }
+        if yt_cookies_file and yt_cookies_file.exists():
+            ydl_opts["cookiefile"] = str(yt_cookies_file)
+
+
 def _inspect_url_sync(
     normalized: str,
-    is_instagram: bool = False,
-    cookies_file: Path | None = None,
+    platform: Literal["x", "instagram", "youtube"] = "x",
+    ig_cookies_file: Path | None = None,
+    yt_cookies_file: Path | None = None,
 ) -> list[MediaItem]:
     """Blocking yt-dlp metadata inspection (run inside asyncio.to_thread)."""
     ydl_opts: dict[str, Any] = {
@@ -706,11 +754,11 @@ def _inspect_url_sync(
         "no_warnings": True,
         "skip_download": True,
         "extract_flat": False,
+        "noplaylist": True,
         "socket_timeout": 20,
         "ffmpeg_location": FFMPEG_PATH,
     }
-    if is_instagram and cookies_file and cookies_file.exists():
-        ydl_opts["cookiefile"] = str(cookies_file)
+    _apply_platform_ydl_opts(ydl_opts, normalized, ig_cookies_file, yt_cookies_file)
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -729,13 +777,13 @@ def _inspect_url_sync(
         entries = [e for e in (info.get("entries") or []) if e]
         for idx, entry in enumerate(entries, start=1):
             parsed = _parse_entry(
-                entry, normalized, playlist_index=idx, is_instagram=is_instagram
+                entry, normalized, playlist_index=idx, platform=platform
             )
             if parsed:
                 items.append(parsed)
     else:
         parsed = _parse_entry(
-            info, normalized, playlist_index=None, is_instagram=is_instagram
+            info, normalized, playlist_index=None, platform=platform
         )
         if parsed:
             items.append(parsed)
@@ -748,19 +796,24 @@ def _inspect_url_sync(
 async def inspect_url(
     url: str,
     cookies_file: Path | None = None,
+    yt_cookies_file: Path | None = None,
 ) -> list[MediaItem]:
-    """Inspect X/Twitter or Instagram URL with automatic fallbacks."""
+    """Inspect X/Twitter, Instagram, or YouTube URL with automatic fallbacks."""
     normalized = normalize_media_url(url)
-    is_ig = _is_instagram_url(normalized)
 
-    if is_ig:
+    if _is_youtube_url(normalized):
+        return await asyncio.to_thread(
+            _inspect_url_sync, normalized, "youtube", None, yt_cookies_file
+        )
+
+    if _is_instagram_url(normalized):
         username = _extract_ig_profile_username(normalized)
         if username:
             return await _inspect_ig_profile(username, normalized, cookies_file=cookies_file)
 
         try:
             return await asyncio.to_thread(
-                _inspect_url_sync, normalized, True, cookies_file
+                _inspect_url_sync, normalized, "instagram", cookies_file, None
             )
         except DownloaderError as primary_err:
             logger.info(
@@ -774,7 +827,7 @@ async def inspect_url(
                 raise primary_err
 
     try:
-        return await asyncio.to_thread(_inspect_url_sync, normalized, False, None)
+        return await asyncio.to_thread(_inspect_url_sync, normalized, "x", None, None)
     except DownloaderError as primary_err:
         logger.info(
             "Primary yt-dlp X inspection failed (%s), trying FxTwitter fallback for %s",
@@ -820,6 +873,7 @@ def _download_media_sync(
     format_selector: str | None,
     playlist_index: int | None,
     cookies_file: Path | None = None,
+    yt_cookies_file: Path | None = None,
 ) -> Path:
     """Blocking yt-dlp download into an isolated temp directory."""
     output_template = str(req_dir / "%(id)s.%(ext)s")
@@ -833,8 +887,7 @@ def _download_media_sync(
         "noplaylist": playlist_index is None,
         "ffmpeg_location": FFMPEG_PATH,
     }
-    if _is_instagram_url(url) and cookies_file and cookies_file.exists():
-        ydl_opts["cookiefile"] = str(cookies_file)
+    _apply_platform_ydl_opts(ydl_opts, url, cookies_file, yt_cookies_file)
 
     if format_selector:
         ydl_opts["format"] = format_selector
@@ -886,6 +939,7 @@ async def download_media(
     format_selector: str | None = None,
     playlist_index: int | None = None,
     cookies_file: Path | None = None,
+    yt_cookies_file: Path | None = None,
 ) -> tuple[Path, Path]:
     """Download video/GIF into a unique temp directory."""
     if format_selector and format_selector.startswith("direct:"):
@@ -903,9 +957,12 @@ async def download_media(
                 format_selector,
                 playlist_index,
                 cookies_file,
+                yt_cookies_file,
             )
             return file_path, req_dir
         except DownloaderError:
+            if _is_youtube_url(url):
+                raise
             if _is_instagram_url(url):
                 items = await _inspect_ig_embed_fallback(url)
             else:
@@ -922,6 +979,81 @@ async def download_media(
                 raise
             shutil.rmtree(req_dir, ignore_errors=True)
             return await download_direct_file(fallback_url, temp_root, default_ext=".mp4")
+    except Exception:
+        shutil.rmtree(req_dir, ignore_errors=True)
+        raise
+
+
+def _download_audio_mp3_sync(
+    url: str,
+    req_dir: Path,
+    playlist_index: int | None,
+    cookies_file: Path | None = None,
+    yt_cookies_file: Path | None = None,
+) -> Path:
+    """Download best audio stream and transcode to MP3 via bundled FFmpeg."""
+    output_template = str(req_dir / "%(id)s.%(ext)s")
+    ydl_opts: dict[str, Any] = {
+        "quiet": True,
+        "no_warnings": True,
+        "outtmpl": output_template,
+        "format": "bestaudio/best",
+        "socket_timeout": 30,
+        "retries": 2,
+        "noplaylist": playlist_index is None,
+        "ffmpeg_location": FFMPEG_PATH,
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ],
+    }
+    _apply_platform_ydl_opts(ydl_opts, url, cookies_file, yt_cookies_file)
+    if playlist_index is not None:
+        ydl_opts["playlist_items"] = str(playlist_index)
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.extract_info(url, download=True)
+    except DownloadError as exc:
+        raise _classify_yt_dlp_error(exc) from exc
+    except Exception as exc:
+        logger.exception("Unexpected error during MP3 extraction")
+        raise DownloaderError("err_audio_failed", str(exc)) from exc
+
+    mp3_files = list(req_dir.glob("*.mp3"))
+    if mp3_files:
+        return mp3_files[0]
+
+    files = [p for p in req_dir.iterdir() if p.is_file()]
+    if files:
+        return files[0]
+
+    raise DownloaderError("err_audio_failed", "Extracted MP3 file not found on disk.")
+
+
+async def download_audio_mp3(
+    url: str,
+    temp_root: Path,
+    playlist_index: int | None = None,
+    cookies_file: Path | None = None,
+    yt_cookies_file: Path | None = None,
+) -> tuple[Path, Path]:
+    """Asynchronously extract MP3 audio from a video URL into a unique temp directory."""
+    temp_root.mkdir(parents=True, exist_ok=True)
+    req_dir = Path(tempfile.mkdtemp(prefix="xbot_", dir=temp_root))
+    try:
+        file_path = await asyncio.to_thread(
+            _download_audio_mp3_sync,
+            url,
+            req_dir,
+            playlist_index,
+            cookies_file,
+            yt_cookies_file,
+        )
+        return file_path, req_dir
     except Exception:
         shutil.rmtree(req_dir, ignore_errors=True)
         raise
