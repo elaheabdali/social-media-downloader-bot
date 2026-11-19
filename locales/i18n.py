@@ -25,7 +25,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "   • X/Twitter: Posts with videos or GIFs\n"
             "   • Instagram: Reels, Photo/Video posts, Carousels, or Profile links (for HD avatar)\n"
             "2. Paste and send the link here.\n"
-            "3. For X videos, choose whether to get the <b>Original Video</b> or convert it to a <b>GIF</b>.\n\n"
+            "3. For X videos, choose a video quality or tap <b>Convert to GIF</b>.\n\n"
             "Use /language anytime to switch between English and Persian."
         ),
         "invalid_link": (
@@ -43,17 +43,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "uploading_photo": "📤 Uploading photo to Telegram...",
         "downloading_video": "⬇️ Downloading video ({quality})...",
         "uploading_video": "📤 Uploading video to Telegram...",
-        "choose_format": (
-            "🎬 <b>Video found!</b>\n"
-            "Title: <i>{title}</i>\n\n"
-            "Would you like to receive the <b>Original Video</b> or convert it to a <b>GIF</b>?"
-        ),
-        "btn_original_video": "🎬 Original Video",
         "btn_convert_gif": "🎞 Convert to GIF",
         "select_quality": (
             "🎬 <b>Video found!</b>\n"
             "Title: <i>{title}</i>\n\n"
-            "Choose a quality to download:"
+            "Choose a video quality or convert it to a <b>GIF</b>:"
         ),
         "select_quality_limit_note": (
             "\n\n⚠️ <i>Note: Options marked with ⚠️ exceed Telegram's 50 MB Bot API limit. "
@@ -81,7 +75,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         ),
         "err_rate_limit": "🚦 Rate limit reached. Please try again in a minute.",
         "err_gif_convert_failed": (
-            "❌ Failed to convert the video to GIF. Please try downloading the original video instead."
+            "❌ Failed to convert the video to GIF. Please try downloading one of the video qualities instead."
         ),
         "err_generic": "❌ Something went wrong while processing this link. Please try again later.",
         "err_upload_failed": "❌ Failed to upload the media to Telegram. Please try again.",
@@ -90,7 +84,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "welcome": (
             "👋 سلام <b>{name}</b> عزیز!\n\n"
             "من می‌توانم محتوای لینک‌های <b>X (توییتر)</b> و <b>اینستاگرام</b> را دانلود کنم:\n"
-            "• <b>X / توییتر:</b> گیف‌ها و ویدیوها (دانلود نسخه اصلی یا تبدیل ویدیو به GIF)\n"
+            "• <b>X / توییتر:</b> گیف‌ها و ویدیوها (دانلود کیفیت اصلی یا تبدیل ویدیو به GIF)\n"
             "• <b>اینستاگرام:</b> ریلز، پست‌های ویدیویی و عکسی، پست‌های اسلایدی و عکس پروفایل\n\n"
             "لطفاً زبان مورد نظر خود را انتخاب کنید یا مستقیم لینک را بفرستید:"
         ),
@@ -102,7 +96,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "   • توییتر: پست‌های حاوی ویدیو یا گیف\n"
             "   • اینستاگرام: ریلز، پست عکسی/ویدیویی، پست‌های چنداسلایدی و لینک پروفایل (برای دانلود عکس پروفایل)\n"
             "۲. لینک را در همین چت ارسال کنید.\n"
-            "۳. برای ویدیوهای توییتر می‌توانید انتخاب کنید که <b>نسخه اصلی ویدیو</b> ارسال شود یا به <b>GIF</b> تبدیل گردد.\n\n"
+            "۳. برای ویدیوهای توییتر می‌توانید کیفیت دلخواه را بزنید یا گزینه <b>تبدیل به GIF</b> را انتخاب کنید.\n\n"
             "برای تغییر زبان در هر زمان از دستور /language استفاده کنید."
         ),
         "invalid_link": (
@@ -120,17 +114,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "uploading_photo": "📤 در حال ارسال عکس به تلگرام...",
         "downloading_video": "⬇️ در حال دانلود ویدیو ({quality})...",
         "uploading_video": "📤 در حال ارسال ویدیو به تلگرام...",
-        "choose_format": (
-            "🎬 <b>ویدیو پیدا شد!</b>\n"
-            "عنوان: <i>{title}</i>\n\n"
-            "مایلید <b>نسخه اصلی ویدیو</b> برایتان ارسال شود یا به <b>GIF</b> تبدیل شود؟"
-        ),
-        "btn_original_video": "🎬 نسخه اصلی ویدیو",
         "btn_convert_gif": "🎞 تبدیل به GIF",
         "select_quality": (
             "🎬 <b>ویدیو پیدا شد!</b>\n"
             "عنوان: <i>{title}</i>\n\n"
-            "کیفیت مورد نظر برای دانلود را انتخاب کنید:"
+            "کیفیت دلخواه ویدیو را انتخاب کنید یا آن را به <b>GIF</b> تبدیل کنید:"
         ),
         "select_quality_limit_note": (
             "\n\n⚠️ <i>توجه: گزینه‌های دارای علامت ⚠️ بیشتر از محدودیت ۵۰ مگابایتی تلگرام هستند. "
@@ -158,7 +146,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         ),
         "err_rate_limit": "🚦 در حال حاضر محدودیت موقت درخواست اعمال شده است. لطفاً یک دقیقه دیگر دوباره تلاش کنید.",
         "err_gif_convert_failed": (
-            "❌ تبدیل ویدیو به GIF ناموفق بود. لطفاً نسخه اصلی ویدیو را دانلود کنید."
+            "❌ تبدیل ویدیو به GIF ناموفق بود. لطفاً یکی از کیفیت‌های اصلی ویدیو را دانلود کنید."
         ),
         "err_generic": "❌ هنگام پردازش این لینک خطایی رخ داد. لطفاً کمی بعد دوباره امتحان کنید.",
         "err_upload_failed": "❌ ارسال فایل به تلگرام ناموفق بود. لطفاً دوباره تلاش کنید.",

@@ -372,11 +372,6 @@ def _parse_entry(
     )
 
 
-# ---------------------------------------------------------------------------
-# X (Twitter) Fallback via FxTwitter
-# ---------------------------------------------------------------------------
-
-
 async def _inspect_via_fxtwitter(url: str) -> list[MediaItem]:
     """Fallback inspector using api.fxtwitter.com to bypass age-restriction/NSFW blocks."""
     parsed = urlparse(url)
@@ -479,11 +474,6 @@ async def _inspect_via_fxtwitter(url: str) -> list[MediaItem]:
     if not items:
         raise DownloaderError("err_no_media")
     return items
-
-
-# ---------------------------------------------------------------------------
-# Instagram Profile & Post/Carousel Extraction
-# ---------------------------------------------------------------------------
 
 
 def _extract_ig_profile_username(url: str) -> str | None:
@@ -703,11 +693,6 @@ async def _inspect_ig_embed_fallback(url: str) -> list[MediaItem]:
     if not items:
         raise DownloaderError("err_no_media")
     return items
-
-
-# ---------------------------------------------------------------------------
-# Core Inspection, Download & GIF Conversion Entrypoints
-# ---------------------------------------------------------------------------
 
 
 def _inspect_url_sync(
@@ -954,13 +939,15 @@ def _convert_to_gif_mp4_sync(input_path: Path, req_dir: Path) -> Path:
         "-c:v",
         "libx264",
         "-preset",
-        "veryfast",
+        "ultrafast",
+        "-threads",
+        "2",
         "-crf",
         "26",
         "-pix_fmt",
         "yuv420p",
         "-vf",
-        "scale='min(720,iw)':-2,fps=24",
+        "scale='min(640,iw)':-2,fps=24",
         "-movflags",
         "+faststart",
         str(output_path),
