@@ -1,4 +1,4 @@
-"""Main entry point for the X/Twitter Media Downloader Telegram Bot."""
+"""Main entry point for the X/Twitter & Instagram Media Downloader Telegram Bot."""
 from __future__ import annotations
 from keep_alive import keep_alive
 
@@ -14,9 +14,9 @@ from aiogram.types import BotCommand
 from config import Settings
 from database import Database
 from handlers import media_router, start_router
+from handlers.trending import router as trending_router
 from services import PendingDownloadStore
 
-# WEBAPP_URL = "https://elaheabdali.github.io/x-media-downloader-bot/"
 
 def setup_logging(level: str) -> None:
     """Configure structured application logging."""
@@ -25,7 +25,6 @@ def setup_logging(level: str) -> None:
         format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    # Reduce noisy third-party logs
     logging.getLogger("aiogram.event").setLevel(logging.WARNING)
 
 
@@ -33,6 +32,7 @@ async def set_bot_commands(bot: Bot) -> None:
     """Register slash commands in Telegram's command menu."""
     commands = [
         BotCommand(command="start", description="Start the bot / شروع ربات"),
+        BotCommand(command="trending", description="Trending GIFs / گیف‌های ترند"),
         BotCommand(command="language", description="Switch language / تغییر زبان"),
         BotCommand(command="help", description="Usage guide / راهنما"),
     ]
@@ -58,7 +58,7 @@ async def main() -> None:
     dp["settings"] = settings
     dp["pending_store"] = pending_store
 
-    dp.include_routers(start_router, media_router)
+    dp.include_routers(start_router, trending_router, media_router)
 
     @dp.startup()
     async def on_startup() -> None:
@@ -88,4 +88,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         pass
-

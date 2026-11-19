@@ -17,15 +17,16 @@ from aiogram.types import (
 )
 
 from database import Database
-from locales import BTN_HELP, BTN_LANGUAGE, get_text
+from locales import BTN_HELP, BTN_LANGUAGE, BTN_TRENDING, get_text
 
 router = Router(name="start")
 
 
 def build_main_menu_keyboard() -> ReplyKeyboardMarkup:
-    """Persistent bottom menu for quick language switching and help."""
+    """Persistent bottom menu for Trending GIFs, language switching, and help."""
     return ReplyKeyboardMarkup(
         keyboard=[
+            [KeyboardButton(text=BTN_TRENDING)],
             [KeyboardButton(text=BTN_LANGUAGE), KeyboardButton(text=BTN_HELP)],
         ],
         resize_keyboard=True,
@@ -55,7 +56,6 @@ async def cmd_start(message: Message, db: Database) -> None:
     lang = await db.get_user_language(user.id)
     safe_name = html.escape(user.full_name or "there")
 
-    # Send persistent reply keyboard first or attach inline keyboard directly
     await message.answer(
         text=get_text(lang, "welcome", name=safe_name),
         reply_markup=build_language_inline_keyboard(),

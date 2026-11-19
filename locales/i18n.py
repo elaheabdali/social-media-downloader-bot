@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 # Persistent ReplyKeyboard button labels (bilingual so users can always tap them)
+BTN_TRENDING = "🔥 Trending GIFs / گیف‌های ترند"
 BTN_LANGUAGE = "🌐 Language / تغییر زبان"
 BTN_HELP = "ℹ️ Help / راهنما"
 
@@ -12,28 +13,42 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "en": {
         "welcome": (
             "👋 Hello <b>{name}</b>!\n\n"
-            "I can download media from <b>X (Twitter)</b> and <b>Instagram</b> links:\n"
-            "• <b>X / Twitter:</b> GIFs & Videos (download original quality or convert to GIF)\n"
-            "• <b>Instagram:</b> Reels, Video/Photo Posts, Carousels & Profile Pictures\n\n"
-            "Please select your language below, or simply paste a link:"
+            "I can download media from <b>X (Twitter)</b> and <b>Instagram</b> links, "
+            "and send you <b>Trending GIFs</b>:\n"
+            "• <b>X / Twitter:</b> GIFs & Videos (original quality or convert to GIF)\n"
+            "• <b>Instagram:</b> Reels, Video/Photo Posts, Carousels & Profile Pictures\n"
+            "• <b>Trending GIFs:</b> Persian & English Twitter trends, Romantic & Meme GIFs\n\n"
+            "Select a language below, tap <b>Trending GIFs</b> in the menu, or paste a link:"
         ),
         "choose_language": "🌐 Please choose your preferred language:",
-        "language_updated": "✅ Language set to <b>English</b>.\nSend any X (Twitter) or Instagram link to start!",
+        "language_updated": "✅ Language set to <b>English</b>.\nSend any X/Instagram link or tap <b>Trending GIFs</b>!",
         "help": (
             "📖 <b>How to use this bot</b>\n\n"
-            "1. Copy a link from <b>X (Twitter)</b> or <b>Instagram</b>:\n"
-            "   • X/Twitter: Posts with videos or GIFs\n"
-            "   • Instagram: Reels, Photo/Video posts, Carousels, or Profile links (for HD avatar)\n"
-            "2. Paste and send the link here.\n"
-            "3. For X videos, choose a video quality or tap <b>Convert to GIF</b>.\n\n"
+            "1. Paste any link from <b>X (Twitter)</b> or <b>Instagram</b> to download videos, GIFs, photos, or avatars.\n"
+            "2. For X videos, choose a video quality or tap <b>Convert to GIF</b>.\n"
+            "3. Tap <b>🔥 Trending GIFs</b> in the bottom menu (or /trending) to browse trending GIFs from "
+            "Persian Twitter, English Twitter, Romantic, and Meme categories.\n\n"
             "Use /language anytime to switch between English and Persian."
         ),
+        "trending_menu_title": (
+            "🔥 <b>Trending GIFs</b>\n\n"
+            "Choose a category to receive fresh & trending GIFs:"
+        ),
+        "cat_fa_twitter": "🇮🇷 ترند توییتر فارسی (Persian X)",
+        "cat_en_twitter": "🌍 English Twitter Trending",
+        "cat_romantic": "❤️ Romantic & Love GIFs",
+        "cat_memes": "😂 Memes, Jokes & Funny",
+        "fetching_trending": "🔍 Finding a fresh trending GIF...",
+        "btn_next_gif": "🔄 Next GIF",
+        "btn_change_category": "📂 Categories",
+        "trending_caption": "🔥 <b>{category}</b>\n✅ @{bot_username}",
+        "err_trending_empty": "😕 Could not fetch a trending GIF right now. Please try again in a moment.",
         "invalid_link": (
-            "🔗 Please send a valid <b>X (Twitter)</b> or <b>Instagram</b> link.\n"
+            "🔗 Please send a valid <b>X (Twitter)</b> or <b>Instagram</b> link, "
+            "or tap <b>🔥 Trending GIFs</b> in the menu.\n"
             "Examples:\n"
             "• <code>https://x.com/username/status/123456789</code>\n"
-            "• <code>https://www.instagram.com/reel/ABC123xyz/</code>\n"
-            "• <code>https://www.instagram.com/username/</code>"
+            "• <code>https://www.instagram.com/reel/ABC123xyz/</code>"
         ),
         "inspecting": "🔍 Inspecting media...",
         "downloading_gif": "⬇️ Downloading GIF...",
@@ -83,28 +98,42 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "fa": {
         "welcome": (
             "👋 سلام <b>{name}</b> عزیز!\n\n"
-            "من می‌توانم محتوای لینک‌های <b>X (توییتر)</b> و <b>اینستاگرام</b> را دانلود کنم:\n"
+            "من می‌توانم محتوای لینک‌های <b>X (توییتر)</b> و <b>اینستاگرام</b> را دانلود کنم "
+            "و <b>گیف‌های ترند</b> برایتان بفرستم:\n"
             "• <b>X / توییتر:</b> گیف‌ها و ویدیوها (دانلود کیفیت اصلی یا تبدیل ویدیو به GIF)\n"
-            "• <b>اینستاگرام:</b> ریلز، پست‌های ویدیویی و عکسی، پست‌های اسلایدی و عکس پروفایل\n\n"
-            "لطفاً زبان مورد نظر خود را انتخاب کنید یا مستقیم لینک را بفرستید:"
+            "• <b>اینستاگرام:</b> ریلز، پست‌های ویدیویی و عکسی، اسلایدها و عکس پروفایل\n"
+            "• <b>گیف‌های ترند:</b> ترندهای توییتر فارسی و انگلیسی، عاشقانه و میم و فان\n\n"
+            "زبان خود را انتخاب کنید، دکمه <b>گیف‌های ترند</b> را بزنید یا مستقیم لینک بفرستید:"
         ),
         "choose_language": "🌐 لطفاً زبان مورد نظر خود را انتخاب کنید:",
-        "language_updated": "✅ زبان ربات به <b>فارسی</b> تغییر یافت.\nحالا می‌توانید لینک X یا اینستاگرام را بفرستید!",
+        "language_updated": "✅ زبان ربات به <b>فارسی</b> تغییر یافت.\nمی‌توانید لینک بفرستید یا دکمه <b>گیف‌های ترند</b> را بزنید!",
         "help": (
             "📖 <b>راهنمای استفاده از ربات</b>\n\n"
-            "۱. لینک پست یا پروفایل را از <b>X (توییتر)</b> یا <b>اینستاگرام</b> کپی کنید:\n"
-            "   • توییتر: پست‌های حاوی ویدیو یا گیف\n"
-            "   • اینستاگرام: ریلز، پست عکسی/ویدیویی، پست‌های چنداسلایدی و لینک پروفایل (برای دانلود عکس پروفایل)\n"
-            "۲. لینک را در همین چت ارسال کنید.\n"
-            "۳. برای ویدیوهای توییتر می‌توانید کیفیت دلخواه را بزنید یا گزینه <b>تبدیل به GIF</b> را انتخاب کنید.\n\n"
+            "۱. لینک پست یا پروفایل را از <b>X (توییتر)</b> یا <b>اینستاگرام</b> بفرستید تا دانلود شود.\n"
+            "۲. برای ویدیوهای توییتر می‌توانید کیفیت دلخواه را بزنید یا گزینه <b>تبدیل به GIF</b> را انتخاب کنید.\n"
+            "۳. با زدن دکمه <b>🔥 گیف‌های ترند</b> در منوی پایین صفحه (یا دستور /trending) می‌توانید گیف‌های ترند "
+            "توییتر فارسی، توییتر انگلیسی، عاشقانه و میم/فان را دریافت کنید.\n\n"
             "برای تغییر زبان در هر زمان از دستور /language استفاده کنید."
         ),
+        "trending_menu_title": (
+            "🔥 <b>گیف‌های ترند و جدید</b>\n\n"
+            "دسته‌بندی مورد نظر خود را انتخاب کنید تا گیف برایتان ارسال شود:"
+        ),
+        "cat_fa_twitter": "🇮🇷 ترند توییتر فارسی",
+        "cat_en_twitter": "🌍 ترند توییتر انگلیسی",
+        "cat_romantic": "❤️ عاشقانه و رمانتیک",
+        "cat_memes": "😂 میم، جوک و فان",
+        "fetching_trending": "🔍 در حال پیدا کردن گیف ترند جدید...",
+        "btn_next_gif": "🔄 گیف بعدی",
+        "btn_change_category": "📂 دسته‌بندی‌ها",
+        "trending_caption": "🔥 <b>{category}</b>\n✅ @{bot_username}",
+        "err_trending_empty": "😕 در حال حاضر دریافت گیف ترند با خطا مواجه شد. لطفاً چند لحظه دیگر دوباره تلاش کنید.",
         "invalid_link": (
-            "🔗 لطفاً یک لینک معتبر از <b>X (توییتر)</b> یا <b>اینستاگرام</b> ارسال کنید.\n"
+            "🔗 لطفاً یک لینک معتبر از <b>X (توییتر)</b> یا <b>اینستاگرام</b> ارسال کنید "
+            "یا از منوی پایین دکمه <b>🔥 گیف‌های ترند</b> را بزنید.\n"
             "مثال‌ها:\n"
             "• <code>https://x.com/username/status/123456789</code>\n"
-            "• <code>https://www.instagram.com/reel/ABC123xyz/</code>\n"
-            "• <code>https://www.instagram.com/username/</code>"
+            "• <code>https://www.instagram.com/reel/ABC123xyz/</code>"
         ),
         "inspecting": "🔍 در حال بررسی اطلاعات لینک...",
         "downloading_gif": "⬇️ در حال دانلود گیف...",

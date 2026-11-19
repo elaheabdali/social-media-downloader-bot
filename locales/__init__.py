@@ -1,5 +1,5 @@
 """Localization package for English and Persian (Farsi)."""
 
-from locales.i18n import BTN_HELP, BTN_LANGUAGE, get_text
+from locales.i18n import BTN_HELP, BTN_LANGUAGE, BTN_TRENDING, get_text
 
-__all__ = ["BTN_HELP", "BTN_LANGUAGE", "get_text"]
+__all__ = ["BTN_HELP", "BTN_LANGUAGE", "BTN_TRENDING", "get_text"]
