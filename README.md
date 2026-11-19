@@ -1,82 +1,43 @@
+# 🚀 Social Media Downloader Telegram Bot
 
-# X (Twitter) GIF & Video Downloader Bot
+An asynchronous, bilingual (**English & Persian**) Telegram bot built with **Python**, **aiogram 3**, and **yt-dlp** for downloading media from **YouTube**, **X (Twitter)**, and **Instagram**.
 
-An asynchronous Telegram bot for downloading GIFs and videos from X (Twitter).
+---
 
-## Try the Bot
+## ✨ Features
 
-[Start the Telegram Bot](https://t.me/bezanDownld_bot)
+### 📺 YouTube
+- **Multi-Resolution Downloads:** Download YouTube videos and Shorts in `1080p`, `720p`, `480p`, `360p`, etc., with automatic Telegram 50 MB size checks.
+- **MP3 Audio Extraction:** Extract crisp `192kbps` MP3 audio from any video using bundled FFmpeg.
+- **YouTube Channel Search:** Search any channel by name or `@handle` (or paste a channel link) to browse and download its latest uploads.
 
-## Features
+### 🐦 X (Twitter)
+- **Videos & Native GIFs:** Automatically detects Twitter GIFs and sends them as looping Telegram animations.
+- **Video-to-GIF Converter:** Convert any X video clip into a lightweight, muted Telegram GIF with one tap.
+- **Resilient Fallback:** Uses `FxTwitter` fallback for age-restricted (NSFW) and `/photo/1` status URLs.
 
-- Download videos from X (Twitter).
-- Automatically detect and send GIFs.
-- Select video quality.
-- English and Persian language support.
-- Asynchronous processing with aiogram.
+### 📸 Instagram
+- **Reels, Posts & Carousels:** Downloads single and multi-slide photo/video posts.
+- **HD Profile Pictures:** Send any public or private Instagram profile link to fetch its full-resolution avatar.
 
-## Tech Stack
+### 🔥 Trending GIFs Menu
+- Browse curated, non-repeating trending GIFs across **Persian X**, **English X**, **Romantic**, and **Memes & Funny** categories.
 
-- Python 3.11+
-- aiogram 3
-- yt-dlp
-- SQLite
-- aiosqlite
-- python-dotenv
+---
 
-## Installation
+## 🛠️ Tech Stack
+- **Framework:** `aiogram` (v3)
+- **Media Engine:** `yt-dlp` + `imageio-ffmpeg` + `aiohttp`
+- **Database:** `aiosqlite` (user language preferences & seen GIF history)
+- **Deployment:** Ready for Render Web Service (`keep_alive.py` health-check server included)
 
-1. Clone the repository.
-2. Create a virtual environment.
-3. Install dependencies.
-4. Configure your `.env` file.
-5. Run the bot.
+---
 
+## ⚙️ Environment Variables
 
-Production-ready, asynchronous Telegram bot built with **Python 3.11+**, **aiogram v3**, **yt-dlp**, **aiosqlite**, and **python-dotenv**.
-
-## Features
-- **Bilingual (English & Persian / فارسی):** Language selection on `/start`, `/language`, or via persistent menu buttons, persisted per user in SQLite.
-- **Smart X/Twitter Detection:** Supports `x.com`, `twitter.com`, `t.co`, `fxtwitter.com`, and `vxtwitter.com`.
-- **Automatic GIF Handling:** Detects X/Twitter looping MP4 GIFs and sends them natively via `send_animation()`.
-- **Interactive Video Quality Selection:** Extracts available resolutions (`1080p`, `720p`, `480p`, `360p`, etc.) with approximate file sizes and Telegram's 50 MB Bot API limit check.
-- **Non-blocking & Clean:** Runs `yt-dlp` inside `asyncio.to_thread` and guarantees per-request temp directory cleanup via `try...finally`.
-
-## Project Structure
-```text
-x_media_downloader_bot/
-├── bot.py                  # Entry point, logging, and graceful shutdown
-├── config.py               # Environment configuration loader
-├── requirements.txt        # Python dependencies
-├── .env.example            # Environment variable template
-├── database/
-│   ├── __init__.py
-│   └── db.py               # Async SQLite user language storage
-├── locales/
-│   ├── __init__.py
-│   └── i18n.py             # English & Persian translations
-├── services/
-│   ├── __init__.py
-│   └── downloader.py       # Async yt-dlp wrapper & temp file management
-└── handlers/
-    ├── __init__.py
-    ├── start.py            # /start, /language, /help handlers
-    └── media.py            # Link detection, GIF auto-send, quality selection
-```
-
-## Quick Start
-1. Install Python 3.11+ and `ffmpeg`.
-2. Create and activate a virtual environment:
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Copy `.env.example` to `.env` and add your `BOT_TOKEN` from `@BotFather`.
-5. Run the bot:
-   ```bash
-   python bot.py
-   ```
+| Variable | Required | Description |
+| :--- | :---: | :--- |
+| `BOT_TOKEN` | Yes | Telegram Bot API token from `@BotFather` |
+| `OWNER_HANDLE` | No | Owner handle shown in startup logs (default: `@elaheabdli`) |
+| `INSTAGRAM_COOKIES` | No | Netscape-formatted `cookies.txt` content for Instagram profile/post auth |
+| `YOUTUBE_COOKIES` | No | Optional Netscape-formatted `cookies.txt` content for YouTube |
