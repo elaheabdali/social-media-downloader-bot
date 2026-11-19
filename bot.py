@@ -1,4 +1,4 @@
-"""Main entry point for the X/Twitter & Instagram Media Downloader Telegram Bot."""
+"""Main entry point for the Social Media Downloader Telegram Bot (X, Instagram, YouTube)."""
 from __future__ import annotations
 from keep_alive import keep_alive
 
@@ -15,6 +15,7 @@ from config import Settings
 from database import Database
 from handlers import media_router, start_router
 from handlers.trending import router as trending_router
+from handlers.youtube import router as youtube_router
 from services import PendingDownloadStore
 
 
@@ -32,6 +33,7 @@ async def set_bot_commands(bot: Bot) -> None:
     """Register slash commands in Telegram's command menu."""
     commands = [
         BotCommand(command="start", description="Start the bot / شروع ربات"),
+        BotCommand(command="youtube", description="Search YouTube channel / جستجوی کانال یوتیوب"),
         BotCommand(command="trending", description="Trending GIFs / گیف‌های ترند"),
         BotCommand(command="language", description="Switch language / تغییر زبان"),
         BotCommand(command="help", description="Usage guide / راهنما"),
@@ -58,7 +60,7 @@ async def main() -> None:
     dp["settings"] = settings
     dp["pending_store"] = pending_store
 
-    dp.include_routers(start_router, trending_router, media_router)
+    dp.include_routers(start_router, trending_router, youtube_router, media_router)
 
     @dp.startup()
     async def on_startup() -> None:

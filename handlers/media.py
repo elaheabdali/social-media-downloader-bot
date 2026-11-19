@@ -1,4 +1,4 @@
-"""Handlers for X/Twitter & Instagram link detection, photo/GIF auto-download, and video quality selection."""
+"""Handlers for X/Twitter, Instagram & YouTube link detection, quality selection, and MP3/GIF actions."""
 
 from __future__ import annotations
 
@@ -24,9 +24,12 @@ from services import (
     DownloaderError,
     MediaItem,
     PendingDownloadStore,
+    download_audio_mp3,
     download_media,
     extract_x_url,
     inspect_url,
+    is_youtube_channel_url,
+    resolve_channel_id_from_url,
 )
 from services.downloader import convert_video_to_gif_mp4, download_direct_file
 
@@ -46,7 +49,7 @@ def _build_quality_keyboard(
     media: MediaItem,
     lang: str,
 ) -> tuple[InlineKeyboardMarkup, bool]:
-    """Build a 2-column inline keyboard of video resolutions plus Convert to GIF button."""
+    """Build a 2-column inline keyboard of video resolutions plus MP3 Audio / GIF buttons."""
     buttons: list[InlineKeyboardButton] = []
     has_over_limit = False
 
@@ -77,15 +80,20 @@ def _build_quality_keyboard(
 
     rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
 
-    if getattr(media, "platform", "x") == "x":
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text=get_text(lang, "btn_convert_gif"),
-                    callback_data=f"gif:{token}",
-                )
-            ]
+    extra_row: list[InlineKeyboardButton] = [
+        InlineKeyboardButton(
+            text=get_text(lang, "btn_audio_mp3"),
+            callback_data=f"mp3:{token}",
         )
+    ]
+    if getattr(media, "platform", "x") == "x":
+        extra_row.append(
+            InlineKeyboardButton(
+                text=get_text(lang, "btn_convert_gif"),
+                callback_data=f"gif:{token}",
+            )
+        )
+    rows.append(extra_row)
 
     return InlineKeyboardMarkup(inline_keyboard=rows), has_over_limit
 
@@ -167,6 +175,7 @@ async def _process_gif(
             format_selector="best[ext=mp4]/best",
             playlist_index=media.playlist_index,
             cookies_file=settings.instagram_cookies_file,
+            yt_cookies_file=settings.youtube_cookies_file,
         )
 
         size_bytes = file_path.stat().st_size
@@ -204,7 +213,7 @@ async def handle_text_message(
     pending_store: PendingDownloadStore,
     bot: Bot,
 ) -> None:
-    """Detect X/Twitter & Instagram URLs, inspect metadata, and handle photos, GIFs, or videos."""
+    """Detect X/Twitter, Instagram & YouTube URLs, inspect metadata, and handle downloads."""
     if message.from_user is None or not message.text:
         return
 
@@ -214,10 +223,26 @@ async def handle_text_message(
         await message.reply(get_text(lang, "invalid_link"))
         return
 
+    # If user pasted a YouTube channel link directly, show its latest videos
+    if is_youtube_channel_url(url):
+        from handlers.youtube import show_channel_latest_videos
+
+        status_msg = await message.reply(get_text(lang, "yt_fetching_videos"))
+        channel_id = await resolve_channel_id_from_url(url)
+        if not channel_id:
+            await _safe_edit(status_msg, get_text(lang, "yt_channel_not_found"))
+            return
+        await show_channel_latest_videos(status_msg, channel_id, lang, edit_existing=True)
+        return
+
     status_msg = await message.reply(get_text(lang, "inspecting"))
 
     try:
-        media_items = await inspect_url(url, cookies_file=settings.instagram_cookies_file)
+        media_items = await inspect_url(
+            url,
+            cookies_file=settings.instagram_cookies_file,
+            yt_cookies_file=settings.youtube_cookies_file,
+        )
     except DownloaderError as exc:
         await _safe_edit(status_msg, get_text(lang, exc.error_key))
         return
@@ -254,6 +279,76 @@ async def handle_text_message(
             if has_over_limit:
                 prompt += get_text(lang, "select_quality_limit_note")
             await _safe_edit(item_status, prompt, reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith("mp3:"))
+async def cb_download_mp3(
+    callback: CallbackQuery,
+    db: Database,
+    settings: Settings,
+    pending_store: PendingDownloadStore,
+    bot: Bot,
+) -> None:
+    """Extract and upload MP3 audio for the selected video."""
+    if callback.data is None or callback.message is None:
+        return
+
+    lang = await db.get_user_language(callback.from_user.id)
+    parts = callback.data.split(":")
+    if len(parts) != 2:
+        await callback.answer(get_text(lang, "err_generic"), show_alert=True)
+        return
+
+    _, token = parts
+    pending = pending_store.get(token)
+    if pending is None or pending.user_id != callback.from_user.id:
+        await callback.answer(get_text(lang, "session_expired"), show_alert=True)
+        return
+
+    await callback.answer()
+    if not isinstance(callback.message, Message):
+        return
+
+    status_msg = callback.message
+    await _safe_edit(status_msg, get_text(lang, "downloading_audio"))
+
+    req_dir: Path | None = None
+    try:
+        audio_path, req_dir = await download_audio_mp3(
+            url=pending.media.source_url,
+            temp_root=settings.temp_dir,
+            playlist_index=pending.media.playlist_index,
+            cookies_file=settings.instagram_cookies_file,
+            yt_cookies_file=settings.youtube_cookies_file,
+        )
+
+        size_bytes = audio_path.stat().st_size
+        if size_bytes > TELEGRAM_MAX_FILE_SIZE_BYTES:
+            await _safe_edit(
+                status_msg,
+                get_text(lang, "file_too_large", size_mb=size_bytes / (1024 * 1024)),
+            )
+            return
+
+        await _safe_edit(status_msg, get_text(lang, "uploading_audio"))
+        me = await bot.get_me()
+        caption = get_text(lang, "done_caption", bot_username=me.username or "bot")
+
+        await status_msg.answer_audio(
+            audio=FSInputFile(audio_path),
+            title=pending.media.title,
+            caption=caption,
+        )
+        pending_store.remove(token)
+        await status_msg.delete()
+    except DownloaderError as exc:
+        await _safe_edit(status_msg, get_text(lang, exc.error_key))
+    except Exception:
+        logger.exception("Failed to extract/upload MP3 audio")
+        await _safe_edit(status_msg, get_text(lang, "err_audio_failed"))
+    finally:
+        if req_dir is not None:
+            shutil.rmtree(req_dir, ignore_errors=True)
 
 
 @router.callback_query(F.data.startswith("gif:"))
@@ -301,6 +396,7 @@ async def cb_convert_video_to_gif(
             format_selector=selector,
             playlist_index=pending.media.playlist_index,
             cookies_file=settings.instagram_cookies_file,
+            yt_cookies_file=settings.youtube_cookies_file,
         )
 
         gif_path = await convert_video_to_gif_mp4(raw_video_path, req_dir)
@@ -399,6 +495,7 @@ async def cb_download_video(
             format_selector=quality.format_selector,
             playlist_index=pending.media.playlist_index,
             cookies_file=settings.instagram_cookies_file,
+            yt_cookies_file=settings.youtube_cookies_file,
         )
 
         size_bytes = file_path.stat().st_size

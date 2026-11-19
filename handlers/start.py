@@ -17,16 +17,16 @@ from aiogram.types import (
 )
 
 from database import Database
-from locales import BTN_HELP, BTN_LANGUAGE, BTN_TRENDING, get_text
+from locales import BTN_HELP, BTN_LANGUAGE, BTN_TRENDING, BTN_YOUTUBE, get_text
 
 router = Router(name="start")
 
 
 def build_main_menu_keyboard() -> ReplyKeyboardMarkup:
-    """Persistent bottom menu for Trending GIFs, language switching, and help."""
+    """Persistent bottom menu for Trending GIFs, YouTube Channel search, language, and help."""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=BTN_TRENDING)],
+            [KeyboardButton(text=BTN_TRENDING), KeyboardButton(text=BTN_YOUTUBE)],
             [KeyboardButton(text=BTN_LANGUAGE), KeyboardButton(text=BTN_HELP)],
         ],
         resize_keyboard=True,
