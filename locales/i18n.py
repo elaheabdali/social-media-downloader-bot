@@ -12,31 +12,44 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "en": {
         "welcome": (
             "👋 Hello <b>{name}</b>!\n\n"
-            "I can download <b>GIFs</b> and <b>Videos</b> from X (Twitter) links.\n"
-            "• <b>GIFs</b> are sent automatically as native Telegram animations.\n"
-            "• <b>Videos</b> let you choose your preferred resolution.\n\n"
-            "Please select your language below, or simply paste an X/Twitter link:"
+            "I can download media from <b>X (Twitter)</b> and <b>Instagram</b> links:\n"
+            "• <b>X / Twitter:</b> GIFs & Videos (download original quality or convert to GIF)\n"
+            "• <b>Instagram:</b> Reels, Video/Photo Posts, Carousels & Profile Pictures\n\n"
+            "Please select your language below, or simply paste a link:"
         ),
         "choose_language": "🌐 Please choose your preferred language:",
-        "language_updated": "✅ Language set to <b>English</b>.\nSend any X (Twitter) link to start!",
+        "language_updated": "✅ Language set to <b>English</b>.\nSend any X (Twitter) or Instagram link to start!",
         "help": (
             "📖 <b>How to use this bot</b>\n\n"
-            "1. Copy a link to any X/Twitter post containing a video or GIF.\n"
-            "   (Supports <code>x.com</code>, <code>twitter.com</code>, <code>t.co</code>, "
-            "<code>fxtwitter.com</code>, and <code>vxtwitter.com</code>)\n"
+            "1. Copy a link from <b>X (Twitter)</b> or <b>Instagram</b>:\n"
+            "   • X/Twitter: Posts with videos or GIFs\n"
+            "   • Instagram: Reels, Photo/Video posts, Carousels, or Profile links (for HD avatar)\n"
             "2. Paste and send the link here.\n"
-            "3. GIFs download automatically; for videos, pick your desired quality.\n\n"
+            "3. For X videos, choose whether to get the <b>Original Video</b> or convert it to a <b>GIF</b>.\n\n"
             "Use /language anytime to switch between English and Persian."
         ),
         "invalid_link": (
-            "🔗 Please send a valid X (Twitter) link.\n"
-            "Example: <code>https://x.com/username/status/123456789</code>"
+            "🔗 Please send a valid <b>X (Twitter)</b> or <b>Instagram</b> link.\n"
+            "Examples:\n"
+            "• <code>https://x.com/username/status/123456789</code>\n"
+            "• <code>https://www.instagram.com/reel/ABC123xyz/</code>\n"
+            "• <code>https://www.instagram.com/username/</code>"
         ),
-        "inspecting": "🔍 Inspecting post media...",
+        "inspecting": "🔍 Inspecting media...",
         "downloading_gif": "⬇️ Downloading GIF...",
+        "converting_to_gif": "🎞 Downloading and converting video to GIF...",
         "uploading_gif": "📤 Uploading GIF to Telegram...",
+        "downloading_photo": "⬇️ Downloading photo...",
+        "uploading_photo": "📤 Uploading photo to Telegram...",
         "downloading_video": "⬇️ Downloading video ({quality})...",
         "uploading_video": "📤 Uploading video to Telegram...",
+        "choose_format": (
+            "🎬 <b>Video found!</b>\n"
+            "Title: <i>{title}</i>\n\n"
+            "Would you like to receive the <b>Original Video</b> or convert it to a <b>GIF</b>?"
+        ),
+        "btn_original_video": "🎬 Original Video",
+        "btn_convert_gif": "🎞 Convert to GIF",
         "select_quality": (
             "🎬 <b>Video found!</b>\n"
             "Title: <i>{title}</i>\n\n"
@@ -57,47 +70,63 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "multi_media_notice": "📦 Found {count} media items in this post. Processing...",
         "done_caption": "✅ Downloaded via @{bot_username}",
         "err_no_media": (
-            "😕 No downloadable video or GIF was found in this post.\n"
-            "(Image-only or text-only posts are not supported.)"
+            "😕 No downloadable media was found in this link.\n"
+            "(Text-only posts or Instagram Stories are not supported.)"
         ),
         "err_private_or_deleted": (
-            "🔒 Could not access this post. It may be private, deleted, or from a suspended account."
+            "🔒 Could not access this content. It may be from a private account, deleted, or unavailable."
         ),
         "err_age_restricted": (
-            "🔞 This post appears to be age-restricted or requires an X login to view."
+            "🔞 This content is age-restricted or requires login to view."
         ),
-        "err_rate_limit": "🚦 X/Twitter is temporarily rate-limiting requests. Please try again in a minute.",
+        "err_rate_limit": "🚦 Rate limit reached. Please try again in a minute.",
+        "err_gif_convert_failed": (
+            "❌ Failed to convert the video to GIF. Please try downloading the original video instead."
+        ),
         "err_generic": "❌ Something went wrong while processing this link. Please try again later.",
-        "err_upload_failed": "❌ Failed to upload the media to Telegram. Please try a lower quality.",
+        "err_upload_failed": "❌ Failed to upload the media to Telegram. Please try again.",
     },
     "fa": {
         "welcome": (
             "👋 سلام <b>{name}</b> عزیز!\n\n"
-            "من می‌توانم <b>گیف‌ها (GIF)</b> و <b>ویدیوها</b> را از لینک‌های X (توییتر) برایتان دانلود کنم.\n"
-            "• <b>گیف‌ها</b> به‌صورت خودکار و بدون نیاز به انتخاب کیفیت ارسال می‌شوند.\n"
-            "• برای <b>ویدیوها</b> می‌توانید کیفیت دلخواه را انتخاب کنید.\n\n"
-            "لطفاً زبان مورد نظر خود را انتخاب کنید یا مستقیم لینک پست را بفرستید:"
+            "من می‌توانم محتوای لینک‌های <b>X (توییتر)</b> و <b>اینستاگرام</b> را دانلود کنم:\n"
+            "• <b>X / توییتر:</b> گیف‌ها و ویدیوها (دانلود نسخه اصلی یا تبدیل ویدیو به GIF)\n"
+            "• <b>اینستاگرام:</b> ریلز، پست‌های ویدیویی و عکسی، پست‌های اسلایدی و عکس پروفایل\n\n"
+            "لطفاً زبان مورد نظر خود را انتخاب کنید یا مستقیم لینک را بفرستید:"
         ),
         "choose_language": "🌐 لطفاً زبان مورد نظر خود را انتخاب کنید:",
-        "language_updated": "✅ زبان ربات به <b>فارسی</b> تغییر یافت.\nحالا می‌توانید لینک X (توییتر) را بفرستید!",
+        "language_updated": "✅ زبان ربات به <b>فارسی</b> تغییر یافت.\nحالا می‌توانید لینک X یا اینستاگرام را بفرستید!",
         "help": (
             "📖 <b>راهنمای استفاده از ربات</b>\n\n"
-            "۱. لینک پست X یا توییتر حاوی ویدیو یا گیف را کپی کنید.\n"
-            "   (پشتیبانی از دامنه‌های <code>x.com</code>، <code>twitter.com</code>، <code>t.co</code>، "
-            "<code>fxtwitter.com</code> و <code>vxtwitter.com</code>)\n"
+            "۱. لینک پست یا پروفایل را از <b>X (توییتر)</b> یا <b>اینستاگرام</b> کپی کنید:\n"
+            "   • توییتر: پست‌های حاوی ویدیو یا گیف\n"
+            "   • اینستاگرام: ریلز، پست عکسی/ویدیویی، پست‌های چنداسلایدی و لینک پروفایل (برای دانلود عکس پروفایل)\n"
             "۲. لینک را در همین چت ارسال کنید.\n"
-            "۳. گیف‌ها خودکار ارسال می‌شوند و برای ویدیوها می‌توانید کیفیت دلخواه را انتخاب کنید.\n\n"
+            "۳. برای ویدیوهای توییتر می‌توانید انتخاب کنید که <b>نسخه اصلی ویدیو</b> ارسال شود یا به <b>GIF</b> تبدیل گردد.\n\n"
             "برای تغییر زبان در هر زمان از دستور /language استفاده کنید."
         ),
         "invalid_link": (
-            "🔗 لطفاً یک لینک معتبر از X (توییتر) ارسال کنید.\n"
-            "مثال: <code>https://x.com/username/status/123456789</code>"
+            "🔗 لطفاً یک لینک معتبر از <b>X (توییتر)</b> یا <b>اینستاگرام</b> ارسال کنید.\n"
+            "مثال‌ها:\n"
+            "• <code>https://x.com/username/status/123456789</code>\n"
+            "• <code>https://www.instagram.com/reel/ABC123xyz/</code>\n"
+            "• <code>https://www.instagram.com/username/</code>"
         ),
-        "inspecting": "🔍 در حال بررسی اطلاعات پست...",
+        "inspecting": "🔍 در حال بررسی اطلاعات لینک...",
         "downloading_gif": "⬇️ در حال دانلود گیف...",
+        "converting_to_gif": "🎞 در حال دانلود و تبدیل ویدیو به GIF...",
         "uploading_gif": "📤 در حال ارسال گیف به تلگرام...",
+        "downloading_photo": "⬇️ در حال دانلود عکس...",
+        "uploading_photo": "📤 در حال ارسال عکس به تلگرام...",
         "downloading_video": "⬇️ در حال دانلود ویدیو ({quality})...",
         "uploading_video": "📤 در حال ارسال ویدیو به تلگرام...",
+        "choose_format": (
+            "🎬 <b>ویدیو پیدا شد!</b>\n"
+            "عنوان: <i>{title}</i>\n\n"
+            "مایلید <b>نسخه اصلی ویدیو</b> برایتان ارسال شود یا به <b>GIF</b> تبدیل شود؟"
+        ),
+        "btn_original_video": "🎬 نسخه اصلی ویدیو",
+        "btn_convert_gif": "🎞 تبدیل به GIF",
         "select_quality": (
             "🎬 <b>ویدیو پیدا شد!</b>\n"
             "عنوان: <i>{title}</i>\n\n"
@@ -118,18 +147,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "multi_media_notice": "📦 {count} رسانه در این پست پیدا شد. در حال پردازش...",
         "done_caption": "✅ دانلود شده توسط @{bot_username}",
         "err_no_media": (
-            "😕 هیچ ویدیو یا گیف قابل دانلودی در این پست پیدا نشد.\n"
-            "(پست‌های متنی یا فقط عکس پشتیبانی نمی‌شوند.)"
+            "😕 هیچ رسانه قابل دانلودی در این لینک پیدا نشد.\n"
+            "(پست‌های فقط متنی یا استوری‌های اینستاگرام پشتیبانی نمی‌شوند.)"
         ),
         "err_private_or_deleted": (
-            "🔒 امکان دسترسی به این پست وجود ندارد. ممکن است پست خصوصی، حذف‌شده یا مربوط به اکانت مسدودشده باشد."
+            "🔒 امکان دسترسی به این محتوا وجود ندارد. ممکن است پیج خصوصی باشد یا پست حذف شده باشد."
         ),
         "err_age_restricted": (
-            "🔞 این پست دارای محدودیت سنی است یا برای مشاهده آن نیاز به ورود به حساب X دارد."
+            "🔞 این محتوا دارای محدودیت سنی است یا برای مشاهده آن نیاز به ورود به حساب کاربری دارد."
         ),
-        "err_rate_limit": "🚦 در حال حاضر X/توییتر محدودیت موقت اعمال کرده است. لطفاً یک دقیقه دیگر دوباره تلاش کنید.",
+        "err_rate_limit": "🚦 در حال حاضر محدودیت موقت درخواست اعمال شده است. لطفاً یک دقیقه دیگر دوباره تلاش کنید.",
+        "err_gif_convert_failed": (
+            "❌ تبدیل ویدیو به GIF ناموفق بود. لطفاً نسخه اصلی ویدیو را دانلود کنید."
+        ),
         "err_generic": "❌ هنگام پردازش این لینک خطایی رخ داد. لطفاً کمی بعد دوباره امتحان کنید.",
-        "err_upload_failed": "❌ ارسال فایل به تلگرام ناموفق بود. لطفاً کیفیت پایین‌تری را امتحان کنید.",
+        "err_upload_failed": "❌ ارسال فایل به تلگرام ناموفق بود. لطفاً دوباره تلاش کنید.",
     },
 }
 

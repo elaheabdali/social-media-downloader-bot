@@ -1,590 +1,3 @@
-# """Asynchronous yt-dlp + FxTwitter fallback wrapper for X (Twitter) GIF and video extraction."""
-
-# from __future__ import annotations
-
-# import asyncio
-# import logging
-# import re
-# import shutil
-# import tempfile
-# import time
-# import uuid
-# from dataclasses import dataclass, field
-# from pathlib import Path
-# from typing import Any, Literal
-# from urllib.parse import urlparse, urlunparse
-
-# import aiohttp
-# import imageio_ffmpeg
-# import yt_dlp
-# from yt_dlp.utils import DownloadError
-
-# from config import TELEGRAM_MAX_FILE_SIZE_BYTES
-
-# logger = logging.getLogger(__name__)
-
-# X_URL_REGEX = re.compile(
-#     r"https?://(?:www\.|mobile\.)?"
-#     r"(?:x\.com|twitter\.com|fxtwitter\.com|vxtwitter\.com|t\.co)/[^\s<>\"']+",
-#     re.IGNORECASE,
-# )
-
-# STATUS_PATH_REGEX = re.compile(
-#     r"^/([^/]+/status/\d+)(?:/(?:photo|video)/\d+)?/?$",
-#     re.IGNORECASE,
-# )
-
-# FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
-
-
-# class DownloaderError(Exception):
-#     """Domain-specific error mapped to a localization key."""
-
-#     def __init__(self, error_key: str, detail: str = "") -> None:
-#         self.error_key = error_key
-#         self.detail = detail
-#         super().__init__(detail or error_key)
-
-
-# @dataclass(frozen=True)
-# class VideoQuality:
-#     """Represents a selectable video resolution."""
-
-#     height: int
-#     label: str
-#     format_selector: str
-#     filesize_bytes: int | None
-#     exceeds_limit: bool
-#     direct_url: str | None = None
-
-
-# @dataclass(frozen=True)
-# class MediaItem:
-#     """Inspected media item from an X/Twitter post."""
-
-#     media_type: Literal["gif", "video"]
-#     title: str
-#     source_url: str
-#     duration: float | None
-#     qualities: list[VideoQuality] = field(default_factory=list)
-#     playlist_index: int | None = None
-#     direct_url: str | None = None
-
-
-# @dataclass
-# class PendingDownload:
-#     """Cached metadata for an inline quality-selection menu."""
-
-#     user_id: int
-#     media: MediaItem
-#     created_at: float = field(default_factory=time.monotonic)
-
-
-# class PendingDownloadStore:
-#     """In-memory TTL store mapping short tokens to inspected video metadata."""
-
-#     def __init__(self, ttl_seconds: int = 1800) -> None:
-#         self._ttl = ttl_seconds
-#         self._items: dict[str, PendingDownload] = {}
-
-#     def put(self, user_id: int, media: MediaItem) -> str:
-#         self._purge_expired()
-#         token = uuid.uuid4().hex[:10]
-#         self._items[token] = PendingDownload(user_id=user_id, media=media)
-#         return token
-
-#     def get(self, token: str) -> PendingDownload | None:
-#         self._purge_expired()
-#         return self._items.get(token)
-
-#     def remove(self, token: str) -> None:
-#         self._items.pop(token, None)
-
-#     def _purge_expired(self) -> None:
-#         now = time.monotonic()
-#         expired = [k for k, v in self._items.items() if now - v.created_at > self._ttl]
-#         for key in expired:
-#             self._items.pop(key, None)
-
-
-# def extract_x_url(text: str) -> str | None:
-#     """Return the first valid X/Twitter URL found in text, or None."""
-#     if not text:
-#         return None
-#     match = X_URL_REGEX.search(text)
-#     if not match:
-#         return None
-#     return match.group(0).rstrip(".,);!?")
-
-
-# def normalize_x_url(url: str) -> str:
-#     """Normalize domain, strip /photo/1 or /video/1 suffixes and tracking queries."""
-#     parsed = urlparse(url)
-#     host = parsed.netloc.lower()
-#     if host in {
-#         "fxtwitter.com",
-#         "www.fxtwitter.com",
-#         "vxtwitter.com",
-#         "www.vxtwitter.com",
-#         "mobile.twitter.com",
-#         "mobile.x.com",
-#         "twitter.com",
-#         "www.twitter.com",
-#     }:
-#         parsed = parsed._replace(netloc="x.com")
-
-#     path_match = STATUS_PATH_REGEX.match(parsed.path)
-#     if path_match:
-#         clean_path = f"/{path_match.group(1)}"
-#         parsed = parsed._replace(path=clean_path, query="", fragment="")
-
-#     return urlunparse(parsed)
-
-
-# def _classify_yt_dlp_error(exc: Exception) -> DownloaderError:
-#     """Map raw yt-dlp error strings to localized error keys."""
-#     msg = str(exc).lower()
-#     if any(
-#         kw in msg
-#         for kw in (
-#             "no video could be found",
-#             "there's no video",
-#             "no media",
-#             "unsupported url",
-#             "requested format is not available",
-#         )
-#     ):
-#         return DownloaderError("err_no_media", str(exc))
-#     if any(
-#         kw in msg
-#         for kw in (
-#             "nsfw",
-#             "age-restricted",
-#             "age restricted",
-#             "login",
-#             "sign in",
-#             "authenticate",
-#             "cookies",
-#         )
-#     ):
-#         return DownloaderError("err_age_restricted", str(exc))
-#     if any(
-#         kw in msg
-#         for kw in (
-#             "private",
-#             "protected",
-#             "deleted",
-#             "not found",
-#             "404",
-#             "suspended",
-#             "unavailable",
-#             "403",
-#         )
-#     ):
-#         return DownloaderError("err_private_or_deleted", str(exc))
-#     if any(kw in msg for kw in ("429", "rate limit", "too many requests")):
-#         return DownloaderError("err_rate_limit", str(exc))
-#     return DownloaderError("err_generic", str(exc))
-
-
-# def _estimate_filesize(fmt: dict[str, Any], duration: float | None) -> int | None:
-#     """Return exact or approximate byte size for a format."""
-#     size = fmt.get("filesize") or fmt.get("filesize_approx")
-#     if isinstance(size, (int, float)) and size > 0:
-#         return int(size)
-#     tbr = fmt.get("tbr") or fmt.get("vbr")
-#     if isinstance(tbr, (int, float)) and tbr > 0 and duration and duration > 0:
-#         return int((tbr * 1000 / 8) * duration)
-#     return None
-
-
-# def _is_twitter_gif(info: dict[str, Any], formats: list[dict[str, Any]]) -> bool:
-#     """Detect whether an X/Twitter media entry is an animated GIF (muted looping MP4)."""
-#     for fmt in formats:
-#         url = (fmt.get("url") or "").lower()
-#         if "/tweet_video/" in url:
-#             return True
-
-#     video_formats = [
-#         f for f in formats if f.get("vcodec") not in (None, "none")
-#     ]
-#     if not video_formats:
-#         return False
-
-#     has_any_audio = any(
-#         f.get("acodec") not in (None, "none") for f in formats
-#     )
-#     if not has_any_audio and len(video_formats) == 1:
-#         return True
-#     return False
-
-
-# def _build_video_qualities(
-#     formats: list[dict[str, Any]],
-#     duration: float | None,
-# ) -> list[VideoQuality]:
-#     """Extract deduplicated, sorted video resolutions with size & 50MB limit checks."""
-#     by_height: dict[int, dict[str, Any]] = {}
-
-#     for fmt in formats:
-#         vcodec = fmt.get("vcodec")
-#         height = fmt.get("height")
-#         if vcodec in (None, "none") or not isinstance(height, int) or height <= 0:
-#             continue
-
-#         ext_score = 1 if fmt.get("ext") == "mp4" else 0
-#         audio_score = 1 if fmt.get("acodec") not in (None, "none") else 0
-#         tbr_score = float(fmt.get("tbr") or 0.0)
-#         score = (ext_score, audio_score, tbr_score)
-
-#         existing = by_height.get(height)
-#         if existing is None or score > existing["_score"]:
-#             fmt_copy = dict(fmt)
-#             fmt_copy["_score"] = score
-#             by_height[height] = fmt_copy
-
-#     qualities: list[VideoQuality] = []
-#     for height in sorted(by_height.keys(), reverse=True):
-#         fmt = by_height[height]
-#         fmt_id = str(fmt.get("format_id"))
-#         has_audio = fmt.get("acodec") not in (None, "none")
-#         if has_audio:
-#             selector = fmt_id
-#         else:
-#             selector = (
-#                 f"{fmt_id}+bestaudio[ext=m4a]/{fmt_id}+bestaudio/"
-#                 f"best[height<={height}][ext=mp4]/best[height<={height}]"
-#             )
-
-#         size_bytes = _estimate_filesize(fmt, duration)
-#         exceeds = (
-#             size_bytes is not None and size_bytes > TELEGRAM_MAX_FILE_SIZE_BYTES
-#         )
-#         qualities.append(
-#             VideoQuality(
-#                 height=height,
-#                 label=f"{height}p",
-#                 format_selector=selector,
-#                 filesize_bytes=size_bytes,
-#                 exceeds_limit=exceeds,
-#             )
-#         )
-#     return qualities
-
-
-# def _parse_entry(
-#     entry: dict[str, Any],
-#     source_url: str,
-#     playlist_index: int | None = None,
-# ) -> MediaItem | None:
-#     """Convert a single yt-dlp info dict into a MediaItem."""
-#     formats: list[dict[str, Any]] = entry.get("formats") or []
-#     if not formats:
-#         return None
-
-#     raw_title = (entry.get("title") or entry.get("description") or "X Video").strip()
-#     title = (raw_title[:80] + "…") if len(raw_title) > 80 else raw_title
-#     duration = entry.get("duration")
-
-#     if _is_twitter_gif(entry, formats):
-#         return MediaItem(
-#             media_type="gif",
-#             title=title,
-#             source_url=source_url,
-#             duration=duration,
-#             qualities=[],
-#             playlist_index=playlist_index,
-#         )
-
-#     qualities = _build_video_qualities(formats, duration)
-#     if not qualities:
-#         return None
-
-#     return MediaItem(
-#         media_type="video",
-#         title=title,
-#         source_url=source_url,
-#         duration=duration,
-#         qualities=qualities,
-#         playlist_index=playlist_index,
-#     )
-
-
-# async def _inspect_via_fxtwitter(url: str) -> list[MediaItem]:
-#     """Fallback inspector using api.fxtwitter.com to bypass age-restriction/NSFW blocks."""
-#     parsed = urlparse(url)
-#     api_url = f"https://api.fxtwitter.com{parsed.path}"
-#     headers = {"User-Agent": "Mozilla/5.0 (compatible; TelegramBot/1.0)"}
-
-#     async with aiohttp.ClientSession(headers=headers) as session:
-#         async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-#             if resp.status != 200:
-#                 raise DownloaderError("err_no_media", f"FxTwitter status {resp.status}")
-#             data = await resp.json()
-
-#     tweet = data.get("tweet") or {}
-#     media_block = tweet.get("media") or {}
-#     videos = media_block.get("videos") or []
-#     if not videos:
-#         all_media = media_block.get("all") or []
-#         videos = [m for m in all_media if m.get("type") in ("video", "gif")]
-
-#     if not videos:
-#         raise DownloaderError("err_no_media", "No video/gif found in FxTwitter response")
-
-#     raw_title = (tweet.get("text") or "X Media").strip()
-#     title = (raw_title[:80] + "…") if len(raw_title) > 80 else raw_title
-#     items: list[MediaItem] = []
-
-#     for idx, vid in enumerate(videos, start=1):
-#         vid_type = vid.get("type", "video")
-#         vid_url = vid.get("url")
-#         duration = vid.get("duration")
-#         if not vid_url:
-#             continue
-
-#         if vid_type == "gif" or "/tweet_video/" in vid_url.lower():
-#             items.append(
-#                 MediaItem(
-#                     media_type="gif",
-#                     title=title,
-#                     source_url=url,
-#                     duration=duration,
-#                     qualities=[],
-#                     playlist_index=idx if len(videos) > 1 else None,
-#                     direct_url=vid_url,
-#                 )
-#             )
-#         else:
-#             variants = vid.get("variants") or []
-#             mp4_variants = [
-#                 v for v in variants
-#                 if v.get("content_type") == "video/mp4" and v.get("url")
-#             ]
-#             qualities: list[VideoQuality] = []
-#             seen_heights: set[int] = set()
-
-#             if mp4_variants:
-#                 mp4_variants.sort(key=lambda x: x.get("bitrate", 0), reverse=True)
-#                 for v in mp4_variants:
-#                     m = re.search(r"/(\d+)x(\d+)/", v["url"])
-#                     h = int(m.group(2)) if m else 720
-#                     if h in seen_heights:
-#                         continue
-#                     seen_heights.add(h)
-#                     qualities.append(
-#                         VideoQuality(
-#                             height=h,
-#                             label=f"{h}p",
-#                             format_selector=f"direct:{v['url']}",
-#                             filesize_bytes=None,
-#                             exceeds_limit=False,
-#                             direct_url=v["url"],
-#                         )
-#                     )
-
-#             if not qualities:
-#                 qualities.append(
-#                     VideoQuality(
-#                         height=720,
-#                         label="HD",
-#                         format_selector=f"direct:{vid_url}",
-#                         filesize_bytes=None,
-#                         exceeds_limit=False,
-#                         direct_url=vid_url,
-#                     )
-#                 )
-
-#             items.append(
-#                 MediaItem(
-#                     media_type="video",
-#                     title=title,
-#                     source_url=url,
-#                     duration=duration,
-#                     qualities=qualities,
-#                     playlist_index=idx if len(videos) > 1 else None,
-#                     direct_url=vid_url,
-#                 )
-#             )
-
-#     if not items:
-#         raise DownloaderError("err_no_media")
-#     return items
-
-
-# def _inspect_url_sync(normalized: str) -> list[MediaItem]:
-#     """Blocking yt-dlp metadata inspection (run inside asyncio.to_thread)."""
-#     ydl_opts: dict[str, Any] = {
-#         "quiet": True,
-#         "no_warnings": True,
-#         "skip_download": True,
-#         "extract_flat": False,
-#         "socket_timeout": 20,
-#         "ffmpeg_location": FFMPEG_PATH,
-#     }
-#     try:
-#         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-#             info = ydl.extract_info(normalized, download=False)
-#     except DownloadError as exc:
-#         raise _classify_yt_dlp_error(exc) from exc
-#     except Exception as exc:
-#         logger.exception("Unexpected error during yt-dlp inspection")
-#         raise DownloaderError("err_generic", str(exc)) from exc
-
-#     if not info:
-#         raise DownloaderError("err_no_media")
-
-#     items: list[MediaItem] = []
-#     if info.get("_type") == "playlist" or "entries" in info:
-#         entries = [e for e in (info.get("entries") or []) if e]
-#         for idx, entry in enumerate(entries, start=1):
-#             parsed = _parse_entry(entry, normalized, playlist_index=idx)
-#             if parsed:
-#                 items.append(parsed)
-#     else:
-#         parsed = _parse_entry(info, normalized, playlist_index=None)
-#         if parsed:
-#             items.append(parsed)
-
-#     if not items:
-#         raise DownloaderError("err_no_media")
-#     return items
-
-
-# async def inspect_url(url: str) -> list[MediaItem]:
-#     """Inspect X/Twitter URL via yt-dlp, falling back to FxTwitter for NSFW/age-restricted posts."""
-#     normalized = normalize_x_url(url)
-#     try:
-#         return await asyncio.to_thread(_inspect_url_sync, normalized)
-#     except DownloaderError as primary_err:
-#         logger.info(
-#             "Primary yt-dlp inspection failed (%s), trying FxTwitter fallback for %s",
-#             primary_err.error_key,
-#             normalized,
-#         )
-#         try:
-#             return await _inspect_via_fxtwitter(normalized)
-#         except Exception:
-#             raise primary_err
-
-
-# async def _download_direct_mp4(direct_url: str, req_dir: Path) -> Path:
-#     """Download a direct MP4 stream extracted from FxTwitter fallback."""
-#     out_path = req_dir / f"{uuid.uuid4().hex[:12]}.mp4"
-#     headers = {"User-Agent": "Mozilla/5.0 (compatible; TelegramBot/1.0)"}
-#     async with aiohttp.ClientSession(headers=headers) as session:
-#         async with session.get(direct_url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-#             if resp.status != 200:
-#                 raise DownloaderError("err_generic", f"Direct download failed: HTTP {resp.status}")
-#             with out_path.open("wb") as f:
-#                 async for chunk in resp.content.iter_chunked(65536):
-#                     f.write(chunk)
-#     return out_path
-
-
-# def _download_media_sync(
-#     url: str,
-#     req_dir: Path,
-#     format_selector: str | None,
-#     playlist_index: int | None,
-# ) -> Path:
-#     """Blocking yt-dlp download into an isolated temp directory."""
-#     output_template = str(req_dir / "%(id)s.%(ext)s")
-#     ydl_opts: dict[str, Any] = {
-#         "quiet": True,
-#         "no_warnings": True,
-#         "outtmpl": output_template,
-#         "merge_output_format": "mp4",
-#         "socket_timeout": 30,
-#         "retries": 2,
-#         "noplaylist": playlist_index is None,
-#         "ffmpeg_location": FFMPEG_PATH,
-#     }
-#     if format_selector:
-#         ydl_opts["format"] = format_selector
-#     else:
-#         ydl_opts["format"] = "best[ext=mp4]/best"
-
-#     if playlist_index is not None:
-#         ydl_opts["playlist_items"] = str(playlist_index)
-
-#     try:
-#         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-#             info = ydl.extract_info(url, download=True)
-#             if info is None:
-#                 raise DownloaderError("err_no_media")
-
-#             if "entries" in info:
-#                 entries = [e for e in (info.get("entries") or []) if e]
-#                 if not entries:
-#                     raise DownloaderError("err_no_media")
-#                 target_info = entries[0]
-#             else:
-#                 target_info = info
-
-#             prepared = Path(ydl.prepare_filename(target_info))
-#             if prepared.exists():
-#                 return prepared
-
-#             mp4_candidate = prepared.with_suffix(".mp4")
-#             if mp4_candidate.exists():
-#                 return mp4_candidate
-
-#             files = [p for p in req_dir.iterdir() if p.is_file()]
-#             if files:
-#                 return files[0]
-
-#             raise DownloaderError("err_generic", "Downloaded file not found on disk.")
-#     except DownloaderError:
-#         raise
-#     except DownloadError as exc:
-#         raise _classify_yt_dlp_error(exc) from exc
-#     except Exception as exc:
-#         logger.exception("Unexpected error during yt-dlp download")
-#         raise DownloaderError("err_generic", str(exc)) from exc
-
-
-# async def download_media(
-#     url: str,
-#     temp_root: Path,
-#     format_selector: str | None = None,
-#     playlist_index: int | None = None,
-# ) -> tuple[Path, Path]:
-#     """Download media into a unique temp directory."""
-#     temp_root.mkdir(parents=True, exist_ok=True)
-#     req_dir = Path(tempfile.mkdtemp(prefix="xbot_", dir=temp_root))
-#     try:
-#         if format_selector and format_selector.startswith("direct:"):
-#             direct_url = format_selector.split("direct:", 1)[1]
-#             file_path = await _download_direct_mp4(direct_url, req_dir)
-#             return file_path, req_dir
-
-#         try:
-#             file_path = await asyncio.to_thread(
-#                 _download_media_sync,
-#                 url,
-#                 req_dir,
-#                 format_selector,
-#                 playlist_index,
-#             )
-#             return file_path, req_dir
-#         except DownloaderError:
-#             items = await _inspect_via_fxtwitter(url)
-#             target_idx = (playlist_index - 1) if playlist_index and playlist_index > 0 else 0
-#             target_item = items[min(target_idx, len(items) - 1)]
-#             fallback_url = (
-#                 target_item.qualities[0].direct_url
-#                 if target_item.qualities and target_item.qualities[0].direct_url
-#                 else target_item.direct_url
-#             )
-#             if not fallback_url:
-#                 raise
-#             file_path = await _download_direct_mp4(fallback_url, req_dir)
-#             return file_path, req_dir
-#     except Exception:
-#         shutil.rmtree(req_dir, ignore_errors=True)
-#         raise
-
 """Asynchronous yt-dlp + fallback wrapper for X (Twitter) and Instagram media extraction."""
 
 from __future__ import annotations
@@ -594,6 +7,7 @@ import html as html_lib
 import logging
 import re
 import shutil
+import subprocess
 import tempfile
 import time
 import uuid
@@ -687,6 +101,7 @@ class MediaItem:
     qualities: list[VideoQuality] = field(default_factory=list)
     playlist_index: int | None = None
     direct_url: str | None = None
+    platform: Literal["x", "instagram"] = "x"
 
 
 @dataclass
@@ -925,6 +340,7 @@ def _parse_entry(
     if not formats:
         return None
 
+    platform: Literal["x", "instagram"] = "instagram" if is_instagram else "x"
     default_title = "Instagram Video" if is_instagram else "X Video"
     raw_title = (entry.get("title") or entry.get("description") or default_title).strip()
     title = (raw_title[:80] + "…") if len(raw_title) > 80 else raw_title
@@ -938,6 +354,7 @@ def _parse_entry(
             duration=duration,
             qualities=[],
             playlist_index=playlist_index,
+            platform=platform,
         )
 
     qualities = _build_video_qualities(formats, duration)
@@ -951,6 +368,7 @@ def _parse_entry(
         duration=duration,
         qualities=qualities,
         playlist_index=playlist_index,
+        platform=platform,
     )
 
 
@@ -1002,6 +420,7 @@ async def _inspect_via_fxtwitter(url: str) -> list[MediaItem]:
                     qualities=[],
                     playlist_index=idx if len(videos) > 1 else None,
                     direct_url=vid_url,
+                    platform="x",
                 )
             )
         else:
@@ -1053,6 +472,7 @@ async def _inspect_via_fxtwitter(url: str) -> list[MediaItem]:
                     qualities=qualities,
                     playlist_index=idx if len(videos) > 1 else None,
                     direct_url=vid_url,
+                    platform="x",
                 )
             )
 
@@ -1107,7 +527,6 @@ async def _inspect_ig_profile(
         api_headers["X-CSRFToken"] = cookies["csrftoken"]
 
     async with aiohttp.ClientSession(cookies=cookies) as session:
-        # 1. Primary: Instagram Web Profile Info API (returns profile_pic_url_hd even for private accounts)
         api_url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}"
         try:
             async with session.get(
@@ -1126,6 +545,7 @@ async def _inspect_ig_profile(
                                 title=f"@{username}",
                                 source_url=source_url,
                                 direct_url=pic_url,
+                                platform="instagram",
                             )
                         ]
         except DownloaderError:
@@ -1133,7 +553,6 @@ async def _inspect_ig_profile(
         except Exception:
             logger.debug("IG web_profile_info failed for %s, trying search endpoint", username)
 
-        # 2. Secondary: Instagram TopSearch endpoint (works for both public & private accounts)
         search_url = f"https://www.instagram.com/web/search/topsearch/?context=blended&query={username}"
         try:
             async with session.get(
@@ -1152,12 +571,12 @@ async def _inspect_ig_profile(
                                         title=f"@{username}",
                                         source_url=source_url,
                                         direct_url=pic_url,
+                                        platform="instagram",
                                     )
                                 ]
         except Exception:
             logger.debug("IG topsearch failed for %s, trying HTML fallback", username)
 
-        # 3. Tertiary: Scrape profile HTML for profile_pic_url_hd or og:image
         profile_page = f"https://www.instagram.com/{username}/"
         async with session.get(
             profile_page, headers=BROWSER_HEADERS, timeout=aiohttp.ClientTimeout(total=15)
@@ -1175,6 +594,7 @@ async def _inspect_ig_profile(
                 title=f"@{username}",
                 source_url=source_url,
                 direct_url=pic_url,
+                platform="instagram",
             )
         ]
 
@@ -1191,10 +611,10 @@ async def _inspect_ig_profile(
                 title=f"@{username}",
                 source_url=source_url,
                 direct_url=pic_url,
+                platform="instagram",
             )
         ]
 
-    # If redirected to login wall without cookies, surface age/login error so user knows auth is required
     if not cookies and ("accounts/login" in html_text.lower() or "loginform" in html_text.lower()):
         raise DownloaderError("err_age_restricted")
 
@@ -1244,6 +664,7 @@ async def _inspect_ig_embed_fallback(url: str) -> list[MediaItem]:
                         )
                     ],
                     direct_url=v_url,
+                    platform="instagram",
                 )
             )
 
@@ -1257,6 +678,7 @@ async def _inspect_ig_embed_fallback(url: str) -> list[MediaItem]:
                     title="Instagram Photo",
                     source_url=url,
                     direct_url=i_url,
+                    platform="instagram",
                 )
             )
 
@@ -1274,6 +696,7 @@ async def _inspect_ig_embed_fallback(url: str) -> list[MediaItem]:
                     title="Instagram Photo",
                     source_url=url,
                     direct_url=i_url,
+                    platform="instagram",
                 )
             )
 
@@ -1283,7 +706,7 @@ async def _inspect_ig_embed_fallback(url: str) -> list[MediaItem]:
 
 
 # ---------------------------------------------------------------------------
-# Core Inspection & Download Entrypoints
+# Core Inspection, Download & GIF Conversion Entrypoints
 # ---------------------------------------------------------------------------
 
 
@@ -1365,7 +788,6 @@ async def inspect_url(
             except DownloaderError:
                 raise primary_err
 
-    # X / Twitter flow
     try:
         return await asyncio.to_thread(_inspect_url_sync, normalized, False, None)
     except DownloaderError as primary_err:
@@ -1518,3 +940,50 @@ async def download_media(
     except Exception:
         shutil.rmtree(req_dir, ignore_errors=True)
         raise
+
+
+def _convert_to_gif_mp4_sync(input_path: Path, req_dir: Path) -> Path:
+    """Convert any video file into a muted, Telegram-compatible looping MP4 GIF."""
+    output_path = req_dir / f"gif_{uuid.uuid4().hex[:10]}.mp4"
+    cmd = [
+        FFMPEG_PATH,
+        "-y",
+        "-i",
+        str(input_path),
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "26",
+        "-pix_fmt",
+        "yuv420p",
+        "-vf",
+        "scale='min(720,iw)':-2,fps=24",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=120,
+        )
+    except Exception as exc:
+        logger.exception("FFmpeg subprocess error during GIF conversion")
+        raise DownloaderError("err_gif_convert_failed", str(exc)) from exc
+
+    if result.returncode != 0 or not output_path.exists():
+        stderr_tail = result.stderr.decode("utf-8", errors="ignore")[-400:]
+        logger.error("FFmpeg GIF conversion failed: %s", stderr_tail)
+        raise DownloaderError("err_gif_convert_failed", stderr_tail)
+
+    return output_path
+
+
+async def convert_video_to_gif_mp4(input_path: Path, req_dir: Path) -> Path:
+    """Asynchronously convert a downloaded video into a muted Telegram GIF animation."""
+    return await asyncio.to_thread(_convert_to_gif_mp4_sync, input_path, req_dir)
