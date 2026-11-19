@@ -735,9 +735,6 @@ def _apply_platform_ydl_opts(
         if ig_cookies_file and ig_cookies_file.exists():
             ydl_opts["cookiefile"] = str(ig_cookies_file)
     elif _is_youtube_url(url):
-        ydl_opts["extractor_args"] = {
-            "youtube": {"player_client": ["android", "ios", "web"]}
-        }
         if yt_cookies_file and yt_cookies_file.exists():
             ydl_opts["cookiefile"] = str(yt_cookies_file)
 
